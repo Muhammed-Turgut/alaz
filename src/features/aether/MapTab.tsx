@@ -1,12 +1,12 @@
-import { useEffect, useRef, useState, type ReactNode, type Ref } from "react";
+import { useEffect, useRef, type ReactNode, type Ref } from "react";
 
 import { mapStyleId, usePrefs } from "@/lib/preferences";
 import { fmt } from "./format";
 import type { FirePoint } from "./live/processor";
-import { MapView, type LegendInfo } from "./mapView";
-import type { BBox, HexPayload, HexTotals, LatLng, Sensor } from "./types";
+import { MapView } from "./mapView";
+import type { BBox, HexPayload, LatLng, Sensor } from "./types";
 import { Seg } from "./ui";
-import { rampGradientCss, viz } from "./viz";
+import { viz } from "./viz";
 import styles from "./aether.module.css";
 
 export interface FitCommand { id: number; bbox: BBox | null }
@@ -14,6 +14,7 @@ export interface FitCommand { id: number; bbox: BBox | null }
 interface Props {
   mapRef: Ref<MapView | null>;
   live: boolean;
+  archiveMode?: boolean;
   points: FirePoint[];
   livePerInstrument: { MODIS: number; VIIRS: number };
   liveTotal: number;
@@ -32,6 +33,7 @@ interface Props {
   onRoi: (pts: LatLng[]) => void;
   onDrawing: (d: boolean) => void;
   onBasemap: (ok: boolean) => void;
+  onDrawRoi?: () => void;
 }
 
 const SENSORS: { v: Sensor; label: string }[] = [
@@ -43,7 +45,6 @@ const SENSORS: { v: Sensor; label: string }[] = [
 export function MapTab(p: Props) {
   const el = useRef<HTMLDivElement>(null);
   const view = useRef<MapView | null>(null);
-  const [legend, setLegend] = useState<LegendInfo | null>(null);
   const { sensor, onSensor: setSensor } = p;
   const prefs = usePrefs();
   const styleId = mapStyleId(prefs);
@@ -59,7 +60,7 @@ export function MapTab(p: Props) {
       styleId: styleRef.current,
       onHexClick: (id) => cb.current.onHexClick(id),
       onRoi: (pts) => cb.current.onRoi(pts),
-      onLegend: setLegend,
+      onLegend: () => undefined,
       onBasemap: (ok) => cb.current.onBasemap(ok),
       onDrawing: (d) => cb.current.onDrawing(d),
     });
@@ -90,10 +91,6 @@ export function MapTab(p: Props) {
   }, [p.fit]);
   useEffect(() => { if (p.visible) view.current?.invalidate(); }, [p.visible]);
 
-  const t = p.payload?.totals as HexTotals | undefined;
-  const hasData = !!p.payload && p.payload.cells.length > 0 && !!t && "raw_total" in t;
-  const shown = !hasData || !t ? 0 : sensor === "MODIS" ? t.raw_modis : sensor === "VIIRS" ? t.raw_viirs : t.raw_total;
-
   const c = viz();
   const confLegend: [string, string][] = [
     ["Yüksek güven", c.conf.HIGH], ["Normal güven", c.conf.NOMINAL], ["Düşük güven", c.conf.LOW],
@@ -105,19 +102,18 @@ export function MapTab(p: Props) {
         <div className={styles.mapStats}>
           {p.live ? (
             <>
-              <span><b>{fmt(p.points.length)}</b> / {fmt(p.liveTotal)} nokta (son 24 saat)</span>
+              <span><b>{fmt(p.points.length)}</b> / {fmt(p.liveTotal)} nokta (son 24 saat, gerçek FIRMS)</span>
               {sensor !== "VIIRS" && <span>MODIS {fmt(p.livePerInstrument.MODIS)}</span>}
               {sensor !== "MODIS" && <span>VIIRS {fmt(p.livePerInstrument.VIIRS)}</span>}
             </>
           ) : (
-            <>
-              <span><b>{fmt(shown)}</b> ham tespit</span>
-              {hasData && t && <span>MODIS {fmt(t.raw_modis)}</span>}
-              {hasData && t && <span>VIIRS {fmt(t.raw_viirs)}</span>}
-            </>
+            <span>
+              <b>Arşiv modu</b> — haritada canlı nokta yok; kesikli kutu Türkiye kapsaması.
+              {" "}Poligon çizerek takvim / kırılma / brifing çalıştır.
+            </span>
           )}
         </div>
-        <Seg value={sensor} onChange={setSensor} options={SENSORS} />
+        {p.live && <Seg value={sensor} onChange={setSensor} options={SENSORS} />}
       </div>
 
       {p.hasSelection ? (
@@ -128,9 +124,15 @@ export function MapTab(p: Props) {
       ) : (
         <p className={styles.mapHint}>
           {p.live
-            ? "Canlı NASA FIRMS tespitleri: kümeye tıklayınca açılır, tek noktaya tıklayınca ayrıntısı görünür. Güven ve sıcaklık süzgeçleri sol panelde."
-            : "Bir noktaya tıkla: ham tespit dökümü burada açılır."}
-          {" "}Dünyayı sürükleyerek döndür, tekerlekle yakınlaştır; kendi ilgi alanın için sol panelden poligon çiz.
+            ? "GERÇEK NASA FIRMS (son ~24 saat). Uzaktayken kümeler (sayı), yakınlaşınca güven renkleri. Süzgeçler solda."
+            : "Tarihsel arşiv: harita alan seçmek içindir. Soldan «Poligon çiz» veya aşağıdaki düğme."}
+          {" "}Dünyayı sürükleyerek döndür, tekerlekle yakınlaştır.
+          {!p.live && p.onDrawRoi && (
+            <>
+              {" "}
+              <button type="button" className={styles.inlineLink} onClick={p.onDrawRoi}>Poligon çizmeye başla</button>
+            </>
+          )}
         </p>
       )}
 
@@ -138,7 +140,17 @@ export function MapTab(p: Props) {
         <div ref={el} className={styles.mapEl} />
         {p.live && (
           <div className={styles.legend}>
-            <div>tespit güveni</div>
+            <div>küme (uzak)</div>
+            <div className={styles.legendRow}>
+              <span className={styles.legendDot} style={{ background: c.cluster.small }} />az
+            </div>
+            <div className={styles.legendRow}>
+              <span className={styles.legendDot} style={{ background: c.cluster.medium }} />orta
+            </div>
+            <div className={styles.legendRow}>
+              <span className={styles.legendDot} style={{ background: c.text }} />çok
+            </div>
+            <div className={styles.legendGap}>yakın: tespit güveni</div>
             {confLegend.map(([label, color]) => (
               <div key={label} className={styles.legendRow}>
                 <span className={styles.legendDot} style={{ background: color }} />{label}
@@ -146,16 +158,7 @@ export function MapTab(p: Props) {
             ))}
           </div>
         )}
-        {!p.live && legend && (
-          <div className={styles.legend}>
-            <div>hex başına ham tespit</div>
-            <div className={styles.legendBar} style={{ background: rampGradientCss() }} />
-            <div className={styles.legendTicks}>
-              <span>0</span><span>{fmt(legend.vmax * 0.25, 1)}</span><span>{fmt(legend.vmax, 1)}+</span>
-            </div>
-          </div>
-        )}
-        {p.loading && <div className={styles.mapLoading}>{p.live ? "NASA FIRMS verisi yükleniyor..." : "Altıgenler yükleniyor..."}</div>}
+        {p.loading && <div className={styles.mapLoading}>NASA FIRMS verisi yükleniyor...</div>}
       </div>
     </div>
   );

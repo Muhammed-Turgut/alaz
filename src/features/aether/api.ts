@@ -1,6 +1,7 @@
 import type {
-  BreakPayload, BriefingResult, CalendarPayload, GeometryPayload, Health, HarmonizedDetection, HexDetail,
-  HexPayload, ModelPayload, Region, RoiResult, Scope, SeriesPayload, StaticSources, ValidationPayload,
+  AreaCalendarResult, ArchiveStatus, BreakPayload, BriefingResult, CalendarPayload, GeometryPayload,
+  Health, HarmonizedDetection, HexDetail, HexPayload, LatLng, ModelPayload, Region, RoiResult, Scope,
+  SeriesPayload, StaticSources, ValidationPayload,
 } from "./types";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -40,9 +41,9 @@ function cached<T>(key: string, f: () => Promise<T>): Promise<T> {
 
 const scopeBody = (s: Scope) => ({
   source: s.source,
-  region: s.source === "benchmark" ? s.region : null,
-  start: s.start,
-  end: s.end,
+  region: null,
+  start: s.start || null,
+  end: s.end || null,
   days: s.days,
 });
 
@@ -58,18 +59,60 @@ export const api = {
   structuralBreak: (region: string) => request<BreakPayload>(`/api/structural-break?region=${region}`),
   calendar: (region: string, series: "harmonized" | "raw") =>
     request<CalendarPayload>(`/api/calendar?region=${region}&series=${series}`),
-  hexes: (s: Scope, refresh = false): Promise<HexPayload> =>
-    s.source === "benchmark"
-      ? request(`/api/hexes?region=${s.region}&start=${s.start}&end=${s.end}`)
-      : request(`/api/live?days=${s.days}${refresh ? "&refresh=true" : ""}`),
-  hex: (cell: string, s: Scope) =>
-    request<HexDetail>(
-      s.source === "benchmark"
-        ? `/api/hex/${cell}?source=benchmark&region=${s.region}&start=${s.start}&end=${s.end}`
-        : `/api/hex/${cell}?source=live&days=${s.days}`,
+  archiveStatus: (areaId = "tr") => request<ArchiveStatus>(`/api/archive/${areaId}`),
+  areaCalendar: (opts: {
+    polygon?: LatLng[] | null;
+    bbox?: [number, number, number, number]; // west,south,east,north
+    series: "harmonized" | "raw";
+    target_year?: number;
+    month?: number;
+  }) =>
+    post<AreaCalendarResult>("/api/area-calendar", {
+      polygon: opts.polygon ?? null,
+      bbox: opts.bbox ?? null,
+      series: opts.series,
+      target_year: opts.target_year ?? null,
+      month: opts.month ?? null,
+    }),
+  areaSeries: (opts: {
+    polygon?: LatLng[] | null;
+    freq: "monthly" | "annual";
+  }) =>
+    post<SeriesPayload & { empty?: boolean; message?: string; meta?: AreaCalendarResult["meta"]; local_validation?: Record<string, number> }>(
+      "/api/area-series",
+      { polygon: opts.polygon ?? null, freq: opts.freq },
     ),
+  areaBreak: (opts: { polygon?: LatLng[] | null }) =>
+    post<BreakPayload & { empty?: boolean; message?: string; meta?: AreaCalendarResult["meta"]; local_validation?: Record<string, number> }>(
+      "/api/area-break",
+      { polygon: opts.polygon ?? null },
+    ),
+  hexes: (s: Scope, refresh = false): Promise<HexPayload> =>
+    request(`/api/live?days=${s.days}${refresh ? "&refresh=true" : ""}`),
+  hex: (cell: string, s: Scope) =>
+    request<HexDetail>(`/api/hex/${cell}?source=live&days=${s.days}`),
   roi: (s: Scope) => post<RoiResult>("/api/roi", { ...scopeBody(s), polygon: s.roi }),
   briefing: (s: Scope) => post<BriefingResult>("/api/briefing", { ...scopeBody(s), polygon: s.roi }),
+  interpret: (opts: {
+    polygon: LatLng[];
+    focus: "break" | "calendar" | "model" | "briefing";
+    section?: string;
+    question?: string;
+  }) =>
+    post<{
+      available: boolean;
+      empty?: boolean;
+      message?: string;
+      error?: string;
+      markdown?: string;
+      model?: string;
+      used_numbers?: Record<string, unknown>;
+    }>("/api/interpret", {
+      polygon: opts.polygon,
+      focus: opts.focus,
+      section: opts.section || "overview",
+      question: opts.question || null,
+    }),
   harmonize: (det: Record<string, unknown>) =>
     post<{ detections: HarmonizedDetection[]; model: string }>("/api/harmonize", { detections: [det] }),
 };

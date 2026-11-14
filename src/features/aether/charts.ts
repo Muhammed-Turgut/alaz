@@ -52,8 +52,15 @@ const hideInternal = (i: { text: string }) => !i.text.startsWith("_");
 const cfg = (c: unknown) => c as ChartConfiguration;
 
 // ------------------------------------------------------------------ yapısal kırılma
-export function breakChart(canvas: HTMLCanvasElement, s: SeriesPayload, freq: "monthly" | "annual", b: BreakPayload | null): Chart {
+export function breakChart(
+  canvas: HTMLCanvasElement,
+  s: SeriesPayload,
+  freq: "monthly" | "annual",
+  b: BreakPayload | null,
+  opts?: { archive?: boolean },
+): Chart {
   const v = defaults();
+  const archive = Boolean(opts?.archive);
   const idx = s.labels.indexOf(freq === "monthly" ? "2012-01" : "2012");
   const lines: VLine[] = [{ x: idx, color: v.warn, label: "VIIRS 375 m hizmette (2012-01-20)", width: 1.5, dash: [], row: 0 }];
   if (freq === "monthly" && b) {
@@ -75,7 +82,14 @@ export function breakChart(canvas: HTMLCanvasElement, s: SeriesPayload, freq: "m
         { label: "_lo", data: s.harmonized_lo, borderWidth: 0, pointRadius: 0, backgroundColor: alpha(v.harmonized, 0.16), fill: false },
         { label: "_hi", data: s.harmonized_hi, borderWidth: 0, pointRadius: 0, backgroundColor: alpha(v.harmonized, 0.16), fill: "-1" },
         { label: "Harmonize (VIIRS-eşdeğeri), %90 GA", data: s.harmonized, borderColor: v.harmonized, backgroundColor: v.harmonized, borderWidth: 1.8, pointRadius: 0 },
-        { label: "Gerçek: her yerde SNPP (gizli)", data: s.truth_snpp_everywhere, borderColor: v.truth, borderWidth: 1.2, borderDash: [6, 3], pointRadius: 0 },
+        {
+          label: archive ? "VIIRS yerel (ROI)" : "Gerçek SNPP",
+          data: s.truth_snpp_everywhere,
+          borderColor: v.truth,
+          borderWidth: 1.2,
+          borderDash: [6, 3],
+          pointRadius: 0,
+        },
       ],
     },
     options: {
@@ -85,13 +99,22 @@ export function breakChart(canvas: HTMLCanvasElement, s: SeriesPayload, freq: "m
         y: { title: { display: true, text: freq === "monthly" ? "sıcak nokta / ay" : "sıcak nokta / yıl" }, ticks: { callback: (x: unknown) => fmt(Number(x)) } },
       },
       plugins: {
-        legend: { labels: { filter: hideInternal, usePointStyle: true, boxWidth: 8 } },
+        legend: {
+          labels: {
+            filter: hideInternal,
+            usePointStyle: true,
+            boxWidth: 8,
+            font: { size: 11 },
+            padding: 12,
+          },
+        },
         tooltip: {
           filter: (i: { dataset: { label?: string } }) => !(i.dataset.label ?? "").startsWith("_"),
           callbacks: { label: (c: { dataset: { label?: string }; parsed: { y: number } }) => ` ${c.dataset.label}: ${fmt(c.parsed.y)}` },
         },
         vlines: { lines },
       },
+      layout: { padding: { top: 8, right: 12 } },
     },
     plugins: [vlines],
   }));

@@ -18,6 +18,9 @@ page.on("pageerror", (e) => errors.push(`[pageerror] ${e.message}`));
 page.on("requestfailed", (r) => { if (!/cartocdn|events\.mapbox/.test(r.url())) errors.push(`[reqfail] ${r.url()}`); });
 
 await page.goto(BASE, { waitUntil: "load" });
+await page.waitForSelector("video", { timeout: 30000 });   // açılış videosu: Esc ile geç, teste engel olmasın
+await page.keyboard.press("Escape");
+await page.waitForSelector("video", { state: "detached", timeout: 10000 });
 await page.waitForSelector("text=ham tespit", { timeout: 120000 });
 await page.waitForTimeout(2500);
 await page.screenshot({ path: out("0-default") });

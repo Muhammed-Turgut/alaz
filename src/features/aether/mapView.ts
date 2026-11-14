@@ -282,6 +282,11 @@ export class MapView {
   /** Canlı mod: kümelenmiş, güven renkli NASA FIRMS noktaları; kapalıyken H3 altıgenleri gösterilir. */
   setLive(live: boolean) {
     this.live = live;
+    if (live) {
+      // Benchmark altıgenleri kaynakta kalmasın (görünmez olsa bile karışıklık yaratmasın)
+      this.src("hexes")?.setData({ type: "FeatureCollection", features: [] });
+      this.cells = [];
+    }
     this.applyMode();
   }
 

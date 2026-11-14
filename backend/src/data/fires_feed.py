@@ -45,18 +45,19 @@ class FiresFeed:
             raise LookupError("NASA FIRMS verisine ulaşılamadı (ağ yok ve önbellek/örnek bulunamadı).")
         d = df[df["instrument"] == inst]
         ts = pd.to_datetime(d["ts"])
+        # Ham koruma: lat/lon/parlaklık/FRP yuvarlanmaz (orijinal sayı korunur).
         out = pd.DataFrame({
-            "latitude": d["latitude"].round(5).to_numpy(),
-            "longitude": d["longitude"].round(5).to_numpy(),
+            "latitude": d["latitude"].to_numpy(),
+            "longitude": d["longitude"].to_numpy(),
         })
         conf = d["confidence"].to_numpy()
         if inst == "VIIRS":
-            out["bright_ti4"] = d["bright_t21"].round(1).to_numpy()
+            out["bright_ti4"] = d["bright_t21"].to_numpy()
             out["confidence"] = pd.Series(conf).map(lambda c: "h" if c >= 80 else ("l" if c <= 30 else "n")).to_numpy()
         else:
-            out["brightness"] = d["bright_t21"].round(1).to_numpy()
+            out["brightness"] = d["bright_t21"].to_numpy()
             out["confidence"] = pd.Series(conf).round().astype(int).to_numpy()
-        out["frp"] = d["frp"].round(2).to_numpy()
+        out["frp"] = d["frp"].to_numpy()
         out["acq_date"] = ts.dt.strftime("%Y-%m-%d").to_numpy()
         out["acq_time"] = ts.dt.strftime("%H%M").to_numpy()
         out["source_satellite"] = d["satellite"].to_numpy()

@@ -8,8 +8,9 @@ from functools import lru_cache
 import numpy as np
 import pandas as pd
 
-from src.analytics.burning_calendar import build_calendar
+from src.analytics.burning_calendar import build_calendar, current_month_vs_median, month_year_matrix
 from src.data import benchmark_archives as arch
+from src.data.archive_store import ArchiveStore
 from src.data.firms_client import FirmsClient
 from src.data.regions import BIOMES, REGIONS
 from src.engine import geometry_h3 as geo
@@ -96,6 +97,8 @@ class AetherState:
         self._live_cache: dict = {}
         self.load_seconds = 0.0
         self.trained_now = False
+        self.archive = ArchiveStore("tr")
+        self._area_cache: dict | None = None  # seçilen ROI için günlük seri önbelleği
 
     # ------------------------------------------------------------------
     # loading
@@ -399,11 +402,12 @@ class AetherState:
             return hit["df"], hit["meta"]
         raw, meta = self.firms.fetch_live(days, bbox, force)
         if raw.empty:
-            df = self._synthetic_tail(days, bbox)
-            meta.update({"live": False, "tiers": ["synthetic-benchmark-tail"],
-                         "warning": "No FIRMS data reachable; showing the synthetic benchmark tail."})
-            self._live_cache[key] = {"t": time.time(), "df": df, "meta": meta}
-            return df, meta
+            # Ham Veriyi Koruma: boş FIRMS yanıtında yapay nokta üretilmez.
+            meta.update({"live": False, "tiers": meta.get("tiers") or ["empty"],
+                         "warning": "NASA FIRMS verisine ulaşılamadı; sentetik veri üretilmedi."})
+            empty = pd.DataFrame()
+            self._live_cache[key] = {"t": time.time(), "df": empty, "meta": meta}
+            return empty, meta
         df = prepare(raw)
         df = tag_static(df, self.catalog_cells, use_seeds=True, provisional=(days >= 5))
         nm = max(1, df.loc[df["instrument"] == "MODIS", "satellite"].nunique())
@@ -427,10 +431,28 @@ class AetherState:
     # ------------------------------------------------------------------
     # detail / ROI
     # ------------------------------------------------------------------
-    def _dataset(self, source: str, region: str | None, days: int = 1, bbox=None):
+    def _dataset(self, source: str, region: str | None, days: int = 1, bbox=None, polygon=None):
         if source == "live":
             df, meta = self.get_live(days, bbox)
             return df, "live", meta
+        if source == "archive":
+            # API bbox = [south, west, north, east]; arşiv kutusu = (west, south, east, north)
+            store_bbox = None
+            if bbox is not None:
+                s, w, n, e = bbox
+                store_bbox = (float(w), float(s), float(e), float(n))
+            if polygon is None and store_bbox is None:
+                raise ValueError(
+                    "Gerçek arşiv brifingi için haritada bir poligon çiz "
+                    f"(üst sınır ~{int(self.archive.status().get('max_area_km2', 50000)):,} km², Türkiye kutusu içinde)."
+                )
+            raw, meta = self.archive.query(bbox=store_bbox, polygon=polygon)
+            if raw.empty:
+                return pd.DataFrame(), "spliced", meta
+            df = self._prepare_archive_detections(raw)
+            return df, "spliced", meta
+        if region not in self.regions:
+            raise ValueError(f"unknown region '{region}'")
         return self.regions[region]["df"], "spliced", {}
 
     def _explain_summary(self, sub: pd.DataFrame, max_rows: int = 300) -> dict:
@@ -466,11 +488,13 @@ class AetherState:
                 "reference_night": DIURNAL.night_reference_hour}
 
     def hex_detail(self, cell: str, source: str = "benchmark", region: str | None = None, start=None, end=None,
-                   days: int = 1, bbox=None) -> dict:
-        df, rule, meta = self._dataset(source, region, days, bbox)
+                   days: int = 1, bbox=None, polygon=None) -> dict:
+        df, rule, meta = self._dataset(source, region, days, bbox, polygon=polygon)
+        if df.empty:
+            return {"h3": cell, "empty": True}
         c = geo.h3_int(cell)
         m = np.array((df["h3_7"] == c).to_numpy(), copy=True)
-        if source != "live":
+        if source == "benchmark":
             m = m & self._time_slice(df, start, end)
         sub = df[m]
         if sub.empty:
@@ -509,9 +533,13 @@ class AetherState:
     def roi(self, polygon, source: str = "benchmark", region: str | None = None, start=None, end=None,
             days: int = 1, bbox=None) -> dict:
         cells = geo.cells_in_polygon(polygon, geo.RES_REGIONAL)
-        df, rule, meta = self._dataset(source, region, days, bbox)
+        df, rule, meta = self._dataset(source, region, days, bbox, polygon=polygon)
+        if df.empty:
+            return clean({"source": source, "region": region, "n_cells_in_roi": len(cells),
+                          "roi_area_km2": len(cells) * geo.cell_area_km2(7), "start": start, "end": end,
+                          "empty": True, "meta": meta})
         m = np.array(df["h3_7"].isin(cells).to_numpy(), copy=True)
-        if source != "live":
+        if source == "benchmark":
             m = m & self._time_slice(df, start, end)
         sub = df[m]
         out = {"source": source, "region": region, "n_cells_in_roi": len(cells),
@@ -584,15 +612,16 @@ class AetherState:
             region = region or "california"
             end = end or str(LAST_DAY.date())
             start = start or str((pd.Timestamp(end) - pd.Timedelta(days=13)).date())
-        df, rule, meta = self._dataset(source, region, days, bbox)
+        df, rule, meta = self._dataset(source, region, days, bbox, polygon=polygon)
         m = np.ones(len(df), dtype=bool)
-        if polygon:
+        # Arşiv sorgusu zaten poligonla süzüldü; tekrar H3 kesişimi gereksiz ama zararsız.
+        if polygon and source != "archive":
             m = m & df["h3_7"].isin(geo.cells_in_polygon(polygon, geo.RES_REGIONAL)).to_numpy()
-        if source != "live":
+        if source == "benchmark":
             m = m & self._time_slice(df, start, end)
-        sub = df[m]
+        sub = df[m] if len(df) else df
         if sub.empty:
-            return {"empty": True, "markdown": "# No detections in the selected scope.", "json": {}}
+            return {"empty": True, "markdown": "# Seçilen kapsamda tespit yok.", "json": {}, "meta": meta}
         t = self._hex_table(sub, rule, self.kappa)
         sig = float(np.sqrt(((t["hi"] - t["lo"]) / (2 * Z90)).pow(2).sum()))
         est = float(t["harmonized"].sum())
@@ -616,19 +645,543 @@ class AetherState:
         val = (self.validation.get("regions", {}) or {}).get(region or "all") or (self.validation.get("regions", {}) or {}).get("all")
         if source == "live":
             tiers = ", ".join(meta.get("tiers", []))
-            quality = {"basis": f"FIRMS live feed ({tiers})", "synthetic": False,
-                       "non_live": not meta.get("live", False), "notes": [meta["warning"]] if meta.get("warning") else []}
-            scope = "FIRMS live" + (" - ROI polygon" if polygon else " - current extent")
-            window = f"last {days} day(s)"
+            quality = {"basis": f"FIRMS canlı besleme ({tiers})", "synthetic": False,
+                       "non_live": not meta.get("live", False), "historical": False,
+                       "notes": [meta["warning"]] if meta.get("warning") else []}
+            scope = "FIRMS canlı" + (" — ROI poligon" if polygon else " — güncel kapsama")
+            window = f"son {days} gün"
+        elif source == "archive":
+            dr = meta.get("date_range") or [None, None]
+            quality = {
+                "basis": "NASA FIRMS tarihsel arşivi (Türkiye kapsaması)",
+                "synthetic": False,
+                "non_live": False,
+                "historical": True,
+                "notes": [
+                    meta.get("model_note")
+                    or "Sayılar bu ROI’nin gerçek NASA FIRMS arşivinden. Harmonize isteğe bağlıdır; Ham seri birincil kaynaktır.",
+                    f"Arşiv ilerleme: {meta.get('done_chunks', '?')}/{meta.get('total_chunks', '?')}"
+                    + (" (kısmi)" if meta.get("partial") else ""),
+                ],
+            }
+            scope = "FIRMS arşiv TR" + (" — ROI poligon" if polygon else "")
+            window = f"{dr[0]} → {dr[1]}" if dr[0] else "mevcut arşiv aralığı"
+            val = meta.get("local_validation") or val
         else:
-            quality = {"basis": "Simulated 2001-2026 benchmark archive (known ground truth)", "synthetic": True,
+            quality = {"basis": "Simüle 2001–2026 benchmark arşivi (bilinen yer gerçeği)", "synthetic": True,
                        "non_live": False, "notes": []}
-            scope = f"{REGIONS[region].name}" + (" - ROI polygon" if polygon else " - whole region")
-            window = f"{start} to {end}"
+            scope = f"{REGIONS[region].name}" + (" — ROI poligon" if polygon else " — tüm bölge")
+            window = f"{start} → {end}"
         ctx = {"scope": scope, "window": window, "totals": totals, "top_cells": top, "climate": climate,
                "drivers": self._explain_summary(sub), "quality": quality, "validation": val,
                "centre": [float(sub["latitude"].mean()), float(sub["longitude"].mean())]}
         return clean(generate(ctx))
+
+    # ------------------------------------------------------------------
+    # gerçek FIRMS arşivi (Türkiye kapsama) — seçilen alan (tüm sekmeler)
+    # ------------------------------------------------------------------
+    def archive_status(self) -> dict:
+        return clean(self.archive.status())
+
+    def _prepare_archive_detections(self, raw: pd.DataFrame) -> pd.DataFrame:
+        """Standartlaştırılmış arşiv satırlarını prepare + static + harmonize zincirinden geçir."""
+        keep = [c for c in raw.columns if c not in ("firms_source",)]
+        df = prepare(raw[keep].copy())
+        df = tag_static(df, self.catalog_cells, use_seeds=True, provisional=True)
+        if "nasa_type" in df.columns:
+            m = (df["nasa_type"] == 2) & ~df["is_static"]
+            df.loc[m, "is_static"] = True
+            df.loc[m, "static_reason"] = "nasa-type-2"
+        nm = max(1, int(df.loc[df["instrument"] == "MODIS", "satellite"].nunique()) or 1)
+        nv = max(1, int(df.loc[df["instrument"] == "VIIRS", "satellite"].nunique()) or 1)
+        return pl.attach_harmonized(df, self.model, n_ops_modis=nm, n_ops_viirs=nv)
+
+    @staticmethod
+    def _area_cache_key(polygon, bbox, force: bool) -> tuple:
+        poly = tuple((round(float(a), 5), round(float(b), 5)) for a, b in (polygon or []))
+        box = None if bbox is None else tuple(round(float(x), 5) for x in bbox)
+        return (poly, box, bool(force))
+
+    def _load_area(self, *, polygon=None, bbox=None, force: bool = False) -> tuple[pd.DataFrame, pd.DataFrame, dict]:
+        """Seçilen alan: ham sorgu → prepare/harmonize → günlük seri. Aynı ROI için önbellekler."""
+        store_bbox = None
+        if bbox is not None:
+            if len(bbox) != 4:
+                raise ValueError("bbox must be [west, south, east, north]")
+            store_bbox = (float(bbox[0]), float(bbox[1]), float(bbox[2]), float(bbox[3]))
+        if polygon is None and store_bbox is None:
+            raise ValueError("polygon veya bbox gerekli")
+
+        key = self._area_cache_key(polygon, store_bbox, force)
+        arch_key = (
+            int(self.archive.status().get("done_chunks") or 0),
+            self.archive.status().get("state"),
+        )
+        hit = self._area_cache
+        if hit and not force and hit.get("key") == key and hit.get("arch_key") == arch_key:
+            return hit["df"], hit["daily"], hit["meta"]
+
+        raw, meta = self.archive.query(bbox=store_bbox, polygon=polygon, force=force)
+        if raw.empty:
+            empty = pd.DataFrame()
+            self._area_cache = {"key": key, "arch_key": arch_key, "df": empty, "daily": empty, "meta": meta}
+            return empty, empty, meta
+
+        df = self._prepare_archive_detections(raw)
+        start = str(df["ts"].min().date())
+        end = str(df["ts"].max().date())
+        daily = pl.daily_series(df, start=start, end=end)
+        meta = {
+            **meta,
+            "model": self.model.version,
+            "model_note": "Sayılar bu ROI’nin gerçek NASA FIRMS arşivinden. "
+                          "Harmonize opsiyoneldir; Ham seri birincil kaynaktır.",
+            "detections": int(len(df)),
+            "raw_count": int(len(df)),
+            "date_range": [start, end],
+            "counts": {
+                "raw_all": int(daily["raw_all"].sum()),
+                "raw_modis": int(daily["raw_modis"].sum()),
+                "raw_viirs": int(daily["raw_viirs"].sum()),
+                "static_removed": int(daily["static_removed"].sum()),
+            },
+            "intensity": self._frp_intensity(df),
+        }
+        self._area_cache = {"key": key, "arch_key": arch_key, "df": df, "daily": daily, "meta": meta}
+        return df, daily, meta
+
+    @staticmethod
+    def _frp_intensity(df: pd.DataFrame, start=None, end=None) -> dict:
+        """FIRMS tespit sayısı + FRP (MW) şiddet özeti. start/end dahil gün aralığı."""
+        if df is None or getattr(df, "empty", True) or "frp" not in getattr(df, "columns", []):
+            return {}
+        sub = df
+        if start is not None or end is not None:
+            ts = pd.to_datetime(sub["ts"])
+            if start is not None:
+                sub = sub.loc[ts >= pd.Timestamp(start)]
+                ts = pd.to_datetime(sub["ts"])
+            if end is not None:
+                sub = sub.loc[ts < pd.Timestamp(end) + pd.Timedelta(days=1)]
+        if sub.empty:
+            return {"n_tespit": 0, "frp_toplam_mw": 0.0}
+        frp = pd.to_numeric(sub["frp"], errors="coerce").dropna()
+        if frp.empty:
+            return {"n_tespit": int(len(sub)), "frp_toplam_mw": 0.0}
+        out: dict = {
+            "n_tespit": int(len(sub)),
+            "frp_toplam_mw": round(float(frp.sum()), 1),
+            "frp_ort_mw": round(float(frp.mean()), 2),
+            "frp_medyan_mw": round(float(frp.median()), 2),
+            "frp_p90_mw": round(float(frp.quantile(0.9)), 2),
+            "frp_max_mw": round(float(frp.max()), 2),
+        }
+        if "instrument" in sub.columns:
+            inst = sub["instrument"].astype(str).str.upper()
+            for label, key in (("MODIS", "modis"), ("VIIRS", "viirs")):
+                m = inst.eq(label)
+                g = pd.to_numeric(sub.loc[m, "frp"], errors="coerce").dropna()
+                out[f"{key}_n"] = int(m.sum())
+                out[f"{key}_frp_toplam_mw"] = round(float(g.sum()), 1) if len(g) else 0.0
+                out[f"{key}_frp_ort_mw"] = round(float(g.mean()), 2) if len(g) else None
+        return out
+
+    def _area_local_validation(self, daily: pd.DataFrame) -> dict:
+        if daily is None or daily.empty:
+            return {}
+        monthly = daily.resample("MS").sum(min_count=1)
+        post = monthly.index >= VSTART
+        if not post.any():
+            return {}
+        ref = monthly.loc[post, "viirs_native"].to_numpy(dtype=float)
+        raw_m = monthly.loc[post, "modis_filtered"].to_numpy(dtype=float)
+        harm_m = monthly.loc[post, "harm_modis_only"].to_numpy(dtype=float)
+        both = (ref > 0) & ((raw_m > 0) | (harm_m > 0))
+        return sd.harmonization_metrics(ref[both], raw_m[both], harm_m[both]) if both.any() else {}
+
+    def area_calendar(
+        self,
+        *,
+        polygon: list[list[float]] | None = None,
+        bbox: list[float] | None = None,
+        series: str = "harmonized",
+        target_year: int | None = None,
+        month: int | None = None,
+        force: bool = False,
+    ) -> dict:
+        """Seçilen alan için gerçek FIRMS ham + harmonize yanma takvimi."""
+        df, daily, meta = self._load_area(polygon=polygon, bbox=bbox, force=force)
+        if df.empty:
+            return clean({
+                "empty": True, "meta": meta, "series": series,
+                "message": "Seçilen alanda arşivde tespit yok (indirme süüyor veya alan boş).",
+            })
+        start, end = meta["date_range"]
+        ty = int(target_year or pd.Timestamp(end).year)
+        sy = int(pd.Timestamp(start).year)
+        col = "harmonized" if series == "harmonized" else "raw_all"
+        cal = build_calendar(daily[col].astype(float), target_year=ty, start_year=sy)
+        cal["region"] = "archive:tr"
+        cal["series"] = series
+        return clean({
+            "empty": False,
+            "meta": meta,
+            "calendar": cal,
+            "month_year": month_year_matrix(daily[col].astype(float), start_year=sy, end_year=ty),
+            "current_month_vs_median": current_month_vs_median(
+                daily[col].astype(float), year=ty, month=month,
+            ),
+            "local_validation": self._area_local_validation(daily),
+            "series": series,
+        })
+
+    def area_series(
+        self,
+        *,
+        polygon: list[list[float]] | None = None,
+        bbox: list[float] | None = None,
+        freq: str = "monthly",
+        force: bool = False,
+    ) -> dict:
+        """Seçilen alan için ham / harmonize zaman serisi (yapısal kırılma grafiği)."""
+        df, daily, meta = self._load_area(polygon=polygon, bbox=bbox, force=force)
+        if df.empty:
+            return clean({"empty": True, "meta": meta, "message": "Seçilen alanda tespit yok."})
+        step = "MS" if freq == "monthly" else "YS"
+        m = daily.resample(step).sum(min_count=1)
+        if freq == "monthly" and len(m):
+            # son tamamlanmamış ayı düş (tz-naive; günlük seri UTC-naive)
+            today = pd.Timestamp.utcnow().tz_localize(None).normalize()
+            last_complete = (today.replace(day=1) - pd.Timedelta(days=1)).replace(day=1)
+            m = m.loc[:last_complete]
+        est = m["harmonized"]
+        sdv = np.sqrt(m["harmonized_var"]) * self.kappa
+        # Gerçek arşivde karşı-olgusal yok: 2012 sonrası VIIRS native referans
+        truth = m["viirs_native"].where(m.index >= VSTART)
+        fmt = "%Y-%m" if freq == "monthly" else "%Y"
+        return clean({
+            "empty": False,
+            "region": "archive:tr",
+            "freq": freq,
+            "labels": [t.strftime(fmt) for t in m.index],
+            "raw_all": m["raw_all"],
+            "raw_filtered": m["raw_filtered"],
+            "raw_modis": m["raw_modis"],
+            "raw_viirs": m["raw_viirs"],
+            "harmonized": est,
+            "harmonized_lo": (est - Z90 * sdv).clip(lower=0),
+            "harmonized_hi": est + Z90 * sdv,
+            "truth_snpp_everywhere": truth,
+            "static_removed": m["static_removed"],
+            "transition": "2012-01-20",
+            "partial_last_period": freq == "annual",
+            "meta": meta,
+            "local_validation": self._area_local_validation(daily),
+        })
+
+    def area_break(
+        self,
+        *,
+        polygon: list[list[float]] | None = None,
+        bbox: list[float] | None = None,
+        force: bool = False,
+    ) -> dict:
+        """Seçilen alanda 2012 sensör geçişi yapısal kırılma testleri."""
+        df, daily, meta = self._load_area(polygon=polygon, bbox=bbox, force=force)
+        if df.empty:
+            return clean({"empty": True, "meta": meta, "message": "Seçilen alanda tespit yok."})
+        m = daily.resample("MS").sum(min_count=1)
+        if len(m):
+            today = pd.Timestamp.utcnow().tz_localize(None).normalize()
+            last_complete = (today.replace(day=1) - pd.Timedelta(days=1)).replace(day=1)
+            m = m.loc[:last_complete]
+        truth = m["viirs_native"].where(m.index >= VSTART).fillna(0.0)
+        series = {
+            "raw_all": m["raw_all"],
+            "raw_filtered": m["raw_filtered"],
+            "harmonized": m["harmonized"],
+            "truth": truth,
+        }
+        reports = {k: sd.structural_break_report(v) for k, v in series.items()}
+        verdict = sd.break_verdict(reports)
+        verdict["notes"] = list(verdict.get("notes") or []) + [
+            "Kapsam: çizilen ROI içindeki gerçek NASA FIRMS arşivi (simüle benchmark değil).",
+            f"Ham tespit: {meta.get('raw_count', 0):,} · alan ~{meta.get('area_km2', '?')} km².",
+        ]
+        return clean({
+            "empty": False,
+            "region": "archive:tr",
+            "reports": reports,
+            "verdict": verdict,
+            "meta": meta,
+            "local_validation": self._area_local_validation(daily),
+        })
+
+    # ------------------------------------------------------------------
+    # DeepSeek AI bakışı — ROI sayı özeti
+    # ------------------------------------------------------------------
+    def interpret_roi(
+        self,
+        *,
+        polygon: list[list[float]],
+        focus: str = "break",
+        section: str = "overview",
+        question: str | None = None,
+    ) -> dict:
+        """ROI için bölüm bazlı dayanak üretir ve DeepSeek ile Türkçe yorum döner."""
+        from src.analytics import deepseek_client as ds
+
+        sec = (section or "overview").strip()[:64]
+        if not polygon or len(polygon) < 3:
+            return clean({"available": ds.configured(), "empty": True, "message": "Poligon gerekli (≥ 3 köşe)."})
+
+        need_break = focus in ("break", "model", "briefing") or sec in (
+            "overview", "chart", "stats", "verdict", "explain", "summary", "validation",
+        )
+        need_cal = focus in ("calendar", "briefing") or sec in (
+            "overview", "month_vs_median", "heatmap", "month_year", "envelope", "anomalies",
+        )
+
+        brk = self.area_break(polygon=polygon) if need_break else {"empty": True}
+        if need_break and brk.get("empty") and focus != "calendar":
+            return clean({
+                "available": ds.configured(),
+                "empty": True,
+                "message": brk.get("message") or "Seçilen alanda tespit yok.",
+            })
+
+        cal = self.area_calendar(polygon=polygon, series="raw") if need_cal else {"empty": True}
+        if focus == "calendar" and cal.get("empty"):
+            return clean({
+                "available": ds.configured(),
+                "empty": True,
+                "message": cal.get("message") or "Seçilen alanda tespit yok.",
+            })
+
+        meta = (brk.get("meta") if not brk.get("empty") else None) or (cal.get("meta") if not cal.get("empty") else {}) or {}
+        verdict = brk.get("verdict") or {}
+        reports = brk.get("reports") or {}
+        loc = brk.get("local_validation") or cal.get("local_validation") or {}
+        vs = (cal.get("current_month_vs_median") or {}) if not cal.get("empty") else {}
+        cal_body = (cal.get("calendar") or {}) if not cal.get("empty") else {}
+        anom = cal_body.get("anomalies") or {}
+        my = (cal.get("month_year") or {}) if not cal.get("empty") else {}
+
+        # FRP şiddeti: meta'da yoksa (eski önbellek) ROI'den hesapla
+        intensity = meta.get("intensity") if isinstance(meta.get("intensity"), dict) else None
+        area_df = None
+        if not intensity or sec in ("anomalies", "envelope"):
+            try:
+                area_df, _, area_meta = self._load_area(polygon=polygon)
+                if not intensity:
+                    intensity = area_meta.get("intensity") or self._frp_intensity(area_df)
+            except Exception:
+                area_df = None
+                intensity = intensity or {}
+
+        base_meta = {
+            "bolum": sec,
+            "sekme": focus,
+            "alan_km2": meta.get("area_km2"),
+            "tespit_sayisi": meta.get("raw_count"),
+            "modis_tespit": (meta.get("counts") or {}).get("raw_modis"),
+            "viirs_tespit": (meta.get("counts") or {}).get("raw_viirs"),
+            "tarih": meta.get("date_range"),
+            "siddet_frp": intensity or None,
+            "birim": (
+                "tespit_sayisi = FIRMS sıcak nokta (yangın tespit) adedi; "
+                "frp_* = radyatif güç MW (şiddet göstergesi)."
+            ),
+        }
+
+        def _report_row(name: str, r: dict) -> dict:
+            return {
+                "seri": name,
+                "adim_pct": (r.get("step") or {}).get("step_pct"),
+                "oncesi_ort": (r.get("step") or {}).get("pre_mean"),
+                "sonrasi_ort": (r.get("step") or {}).get("post_mean"),
+                "pettitt_yillik_p": (r.get("pettitt_annual") or {}).get("p_value"),
+                "chow_yillik_p": (r.get("chow_annual") or {}).get("p_value"),
+                "chow_aylik_p": (r.get("chow_monthly") or {}).get("p_value"),
+                "pettitt_yerel_p": (r.get("pettitt_local") or {}).get("p_value"),
+            }
+
+        used: dict
+        if sec in ("stats", "istatistik"):
+            used = {
+                **base_meta,
+                "tablo": "istatistik_testleri",
+                "satirlar": [_report_row(k, v) for k, v in reports.items() if isinstance(v, dict)],
+                "not": "p<0.05 = istatistiksel kırılma; ham adım çoğu zaman sensör artefaktı olabilir.",
+            }
+        elif sec in ("verdict", "yorum"):
+            used = {
+                **base_meta,
+                "tablo": "makine_yorumu",
+                "ham_kirilma": verdict.get("raw_break_at_transition"),
+                "harmonize_adim_kalkti": verdict.get("harmonized_step_eliminated"),
+                "notlar": (verdict.get("notes") or [])[:6],
+            }
+        elif sec in ("chart", "grafik"):
+            raw_rep = reports.get("raw_filtered") or reports.get("raw_all") or {}
+            harm = reports.get("harmonized") or {}
+            used = {
+                **base_meta,
+                "tablo": "kirilma_grafigi",
+                "ham_adim_pct": (raw_rep.get("step") or {}).get("step_pct"),
+                "ham_oncesi": (raw_rep.get("step") or {}).get("pre_mean"),
+                "ham_sonrasi": (raw_rep.get("step") or {}).get("post_mean"),
+                "harmonize_adim_pct": (harm.get("step") or {}).get("step_pct"),
+                "ham_kirilma": verdict.get("raw_break_at_transition"),
+                "harmonize_adim_kalkti": verdict.get("harmonized_step_eliminated"),
+            }
+        elif sec == "explain":
+            used = {
+                **base_meta,
+                "tablo": "bu_ne_gosteriyor",
+                "baglam": "VIIRS 2012-01-20; ham MODIS+VIIRS sıçrama yapay olabilir; harmonize kapatmaya çalışır.",
+                "ham_kirilma": verdict.get("raw_break_at_transition"),
+                "harmonize_adim_kalkti": verdict.get("harmonized_step_eliminated"),
+            }
+        elif sec == "month_vs_median":
+            used = {
+                **base_meta,
+                "tablo": "bu_ay_vs_medyan",
+                "oran": vs.get("ratio"),
+                "yuzdelik": vs.get("percentile"),
+                "ay_toplam": vs.get("month_total"),
+                "tarihsel_medyan": vs.get("historical_median"),
+                "yil": vs.get("year"),
+                "ay": vs.get("month"),
+                "n_yil": vs.get("n_years"),
+                "p10": vs.get("historical_p10"),
+                "p90": vs.get("historical_p90"),
+            }
+        elif sec in ("heatmap", "month_year"):
+            years = my.get("years") or cal_body.get("years") or []
+            totals = cal_body.get("annual_totals") or []
+            peaks = cal_body.get("peak_doy") or []
+            pairs = [
+                {"yil": y, "yillik_toplam": totals[i] if i < len(totals) else None,
+                 "tepe_gun": peaks[i] if i < len(peaks) else None}
+                for i, y in enumerate(years[-8:])
+            ]
+            used = {
+                **base_meta,
+                "tablo": "yil_yogunluk_ozeti",
+                "seri": cal.get("series") or cal_body.get("series") or "raw",
+                "son_yillar": pairs,
+                "not": "Tam ay×yıl matrisi gönderilmedi; yıllık özet.",
+            }
+        elif sec == "envelope":
+            from src.analytics.burning_calendar import envelope_ai_summary
+            ty = cal_body.get("target_year")
+            hedef_siddet = None
+            if area_df is not None and ty:
+                hedef_siddet = self._frp_intensity(area_df, f"{ty}-01-01", f"{ty}-12-31")
+            used = {
+                **base_meta,
+                "tablo": "iklimsel_zarf",
+                **envelope_ai_summary(cal_body),
+                "hedef_yil_siddet": hedef_siddet,
+            }
+        elif sec == "anomalies":
+            eps = (anom.get("episodes") or [])[:8]
+            donemler = []
+            for e in eps:
+                row = {
+                    "bas": e.get("start"),
+                    "bit": e.get("end"),
+                    "gun": e.get("days"),
+                    "tepe_z": e.get("peak_z"),
+                }
+                if area_df is not None and e.get("start") and e.get("end"):
+                    row["siddet"] = self._frp_intensity(area_df, e["start"], e["end"])
+                donemler.append(row)
+            used = {
+                **base_meta,
+                "tablo": "anomali_donemleri",
+                "hedef_yil": cal_body.get("target_year"),
+                "anomali_gun": anom.get("n_days"),
+                "ustunde": anom.get("n_positive"),
+                "altinda": anom.get("n_negative"),
+                "max_z": anom.get("max_z"),
+                "donemler": donemler,
+            }
+        elif sec in ("validation", "summary") and focus == "model":
+            used = {
+                **base_meta,
+                "tablo": "model_dogrulama" if sec == "validation" else "alan_ozeti",
+                "dogrulama": {
+                    "rmse_ham": loc.get("rmse_raw"),
+                    "rmse_harmonize": loc.get("rmse_harmonized"),
+                    "rmse_degisim_pct": loc.get("rmse_reduction_pct"),
+                    "sapma_ham_pct": loc.get("relative_bias_raw_pct"),
+                    "sapma_harmonize_pct": loc.get("relative_bias_harmonized_pct"),
+                    "korelasyon_ham": loc.get("correlation_raw"),
+                    "korelasyon_harmonize": loc.get("correlation_harmonized"),
+                    "n_ay": loc.get("n"),
+                } if loc else None,
+            }
+        elif sec == "validation":
+            used = {
+                **base_meta,
+                "tablo": "yerel_dogrulama",
+                "rmse_ham": loc.get("rmse_raw"),
+                "rmse_harmonize": loc.get("rmse_harmonized"),
+                "rmse_degisim_pct": loc.get("rmse_reduction_pct"),
+                "sapma_ham_pct": loc.get("relative_bias_raw_pct"),
+                "sapma_harmonize_pct": loc.get("relative_bias_harmonized_pct"),
+                "n_ay": loc.get("n"),
+            }
+        else:
+            # overview / briefing: kompakt genel
+            raw_rep = reports.get("raw_filtered") or reports.get("raw_all") or {}
+            used = {
+                **base_meta,
+                "tablo": "genel_ozet",
+                "kirilma": {
+                    "ham_adim_pct": (raw_rep.get("step") or {}).get("step_pct"),
+                    "ham_kirilma": verdict.get("raw_break_at_transition"),
+                    "harmonize_adim_kalkti": verdict.get("harmonized_step_eliminated"),
+                },
+                "bu_ay_vs_medyan": {
+                    "oran": vs.get("ratio"),
+                    "yuzdelik": vs.get("percentile"),
+                } if vs.get("available") else None,
+                "anomali_gun": anom.get("n_days"),
+                "dogrulama": {
+                    "rmse_ham": loc.get("rmse_raw"),
+                    "rmse_harmonize": loc.get("rmse_harmonized"),
+                    "rmse_degisim_pct": loc.get("rmse_reduction_pct"),
+                } if loc else None,
+            }
+
+        if not ds.configured():
+            return clean({
+                "available": False,
+                "empty": False,
+                "used_numbers": used,
+                "message": "DeepSeek API anahtarı tanımlı değil (backend/.env → DEEPSEEK_API_KEY).",
+            })
+
+        try:
+            out = ds.chat_interpret(used, focus=focus, section=sec, question=question)
+        except RuntimeError as exc:
+            return clean({
+                "available": True,
+                "empty": False,
+                "used_numbers": used,
+                "error": str(exc),
+            })
+
+        return clean({
+            "available": True,
+            "empty": False,
+            "markdown": out["markdown"],
+            "model": out["model"],
+            "used_numbers": used,
+        })
 
     # ------------------------------------------------------------------
     # user-supplied detections

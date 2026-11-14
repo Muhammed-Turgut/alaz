@@ -185,29 +185,34 @@ def break_verdict(reports: dict, break_date: str = "2012-01-20") -> dict:
     if raw:
         m = months_from_break(raw["pettitt_monthly"].get("change_date"))
         out["raw_break_at_transition"] = bool(raw["pettitt_monthly"]["significant"] and m is not None and m <= 12)
+        sp = raw["step"].get("step_pct")
+        step_txt = f"{sp:+.0f}%" if sp is not None and np.isfinite(sp) else "n/a"
         out["notes"].append(
-            f"Raw series: Pettitt change-point {raw['pettitt_monthly'].get('change_date')} "
-            f"(p={raw['pettitt_monthly']['p_value']:.1e} monthly, p={raw['pettitt_annual']['p_value']:.1e} annual), "
-            f"step {raw['step']['step_pct']:+.0f}% -> artefact tied to the sensor transition.")
+            f"Ham seri: Pettitt değişim noktası {raw['pettitt_monthly'].get('change_date')} "
+            f"(aylık p={raw['pettitt_monthly']['p_value']:.1e}, yıllık p={raw['pettitt_annual']['p_value']:.1e}), "
+            f"adım {step_txt} → sensör geçişine bağlı yapay kırılma.")
     if har:
         pa, ca = har["pettitt_annual"]["p_value"], har["chow_annual"]["p_value"]
         pm = har["pettitt_monthly"]
         m = months_from_break(pm.get("change_date"))
         local = har.get("pettitt_local", {})
         out["harmonized_step_eliminated"] = bool(pa > 0.05 and ca > 0.05 and (not pm["significant"] or (m is not None and m > 18)))
+        hsp = har["step"].get("step_pct")
+        hstep_txt = f"{hsp:+.1f}%" if hsp is not None and np.isfinite(hsp) else "yok"
         out["notes"].append(
-            f"Harmonized series: annual Pettitt p={pa:.2f}, Chow p={ca:.2f}, step {har['step']['step_pct']:+.1f}%.")
+            f"Harmonize seri: yıllık Pettitt p={pa:.2f}, Chow p={ca:.2f}, adım {hstep_txt}.")
         if local:
             out["notes"].append(
-                f"Local Pettitt (+/-6 y around 2012) p={local['p_value']:.2f} "
-                f"({'no break' if not local['significant'] else 'break at ' + str(local.get('change_date'))}).")
+                f"Yerel Pettitt (2012 ±6 yıl) p={local['p_value']:.2f} "
+                f"({'kırılma yok' if not local['significant'] else 'kırılma: ' + str(local.get('change_date'))}).")
         if pm["significant"]:
             if tru and tru["pettitt_monthly"]["significant"] and months_from_break(tru["pettitt_monthly"].get("change_date")) is not None \
                     and abs((pd.Timestamp(tru["pettitt_monthly"]["change_date"]) - pd.Timestamp(pm["change_date"])).days) < 400:
                 out["notes"].append(
-                    f"Monthly Pettitt still flags {pm.get('change_date')} (p={pm['p_value']:.1e}); the ground-truth series "
-                    f"shows the same break (p={tru['pettitt_monthly']['p_value']:.1e}) - a genuine climate-regime change "
-                    f"in the scenario, not a sensor artefact.")
+                    f"Aylık Pettitt hâlâ {pm.get('change_date')} işaretliyor (p={pm['p_value']:.1e}); yer-gerçeği serisi "
+                    f"aynı kırılmayı gösteriyor (p={tru['pettitt_monthly']['p_value']:.1e}) — senaryoda gerçek iklim rejimi "
+                    f"değişimi, sensör artefaktı değil.")
             else:
-                out["notes"].append(f"Monthly Pettitt flags {pm.get('change_date')} (p={pm['p_value']:.1e}); inspect residual bias.")
+                out["notes"].append(
+                    f"Aylık Pettitt {pm.get('change_date')} işaretliyor (p={pm['p_value']:.1e}); kalan sapmayı incele.")
     return out

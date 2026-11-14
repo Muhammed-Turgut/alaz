@@ -11,6 +11,7 @@ export type InspectorState =
   | { kind: "empty" }
   | { kind: "loading"; label: string }
   | { kind: "error"; message: string }
+  | { kind: "info"; message: string }
   | { kind: "hex"; data: HexDetail }
   | { kind: "roi"; data: RoiResult };
 
@@ -167,6 +168,8 @@ export function Inspector({ state, onBriefing }: { state: InspectorState; onBrie
       return <p className={styles.hint}>{state.label}</p>;
     case "error":
       return <p className={styles.errText}>{state.message}</p>;
+    case "info":
+      return <p className={styles.hint}>{state.message}</p>;
     case "hex":
       return state.data.empty
         ? <p className={styles.hint}>{state.data.h3} için bu pencerede tespit yok.</p>

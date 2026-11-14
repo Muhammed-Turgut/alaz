@@ -18,7 +18,10 @@ from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse, PlainTextResponse
 
-from src.api.schemas import BriefingRequest, HarmonizeRequest, HealthResponse, ROIRequest
+from src.api.schemas import (
+    AreaCalendarRequest, AreaScopeRequest, AreaSeriesRequest,
+    BriefingRequest, HarmonizeRequest, HealthResponse, InterpretRequest, ROIRequest,
+)
 from src.data.fires_feed import FiresFeed
 from src.data.regions import REGIONS
 from src.engine.service import AetherState
@@ -173,7 +176,7 @@ def geometry():
                   "expansion": geo.bowtie_expansion(vs, vt, "VIIRS").round(3).tolist(),
                   "half_swath_km": round(geo.half_swath_km("VIIRS"), 1)},
         "h3": {"res7_km2": round(geo.cell_area_km2(7), 3), "res8_km2": round(geo.cell_area_km2(8), 3)},
-        "note": "VIIRS angle axis is rescaled to its own half-swath (56.28 deg) so both sensors span nadir-to-edge.",
+        "note": "VIIRS açı ekseni kendi yarı-şeridine (56,28°) ölçeklenir; böylece her iki sensör nadirden kenara aynı aralığı kaplar.",
     }
 
 
@@ -254,7 +257,12 @@ def roi(req: ROIRequest):
     start, end = _date(req.start, "start"), _date(req.end, "end")
     _span(start, end)
     rid = _region(req.region) if req.source == "benchmark" else None
-    return _st().roi(req.polygon, req.source, rid, start, end, req.days, _bbox(",".join(map(str, req.bbox))) if req.bbox else None)
+    try:
+        return _st().roi(req.polygon, req.source, rid, start, end, req.days, _bbox(",".join(map(str, req.bbox))) if req.bbox else None)
+    except FileNotFoundError as exc:
+        raise HTTPException(503, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
 
 
 @app.post("/api/harmonize")
@@ -262,10 +270,81 @@ def harmonize(req: HarmonizeRequest):
     return _st().harmonize_detections([d.model_dump() for d in req.detections])
 
 
+@app.get("/api/archive/{area_id}")
+def archive_status(area_id: str = "tr"):
+    st = _st()
+    if area_id != st.archive.area_id:
+        raise HTTPException(404, f"unknown archive '{area_id}'; known: {st.archive.area_id}")
+    return st.archive_status()
+
+
+def _area_call(fn, req):
+    if getattr(req, "polygon", None) is None and getattr(req, "bbox", None) is None:
+        raise HTTPException(422, "polygon veya bbox gerekli")
+    try:
+        return fn()
+    except FileNotFoundError as exc:
+        raise HTTPException(503, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+@app.post("/api/area-calendar")
+def area_calendar(req: AreaCalendarRequest):
+    return _area_call(
+        lambda: _st().area_calendar(
+            polygon=req.polygon, bbox=req.bbox, series=req.series,
+            target_year=req.target_year, month=req.month, force=req.force,
+        ),
+        req,
+    )
+
+
+@app.post("/api/area-series")
+def area_series(req: AreaSeriesRequest):
+    return _area_call(
+        lambda: _st().area_series(
+            polygon=req.polygon, bbox=req.bbox, freq=req.freq, force=req.force,
+        ),
+        req,
+    )
+
+
+@app.post("/api/area-break")
+def area_break(req: AreaScopeRequest):
+    return _area_call(
+        lambda: _st().area_break(polygon=req.polygon, bbox=req.bbox, force=req.force),
+        req,
+    )
+
+
 @app.post("/api/briefing")
 def briefing(req: BriefingRequest):
     start, end = _date(req.start, "start"), _date(req.end, "end")
     _span(start, end)
     rid = _region(req.region) if req.source == "benchmark" else None
-    return _st().briefing(req.source, rid, start, end, req.polygon, req.days,
-                          _bbox(",".join(map(str, req.bbox))) if req.bbox else None)
+    try:
+        return _st().briefing(req.source, rid, start, end, req.polygon, req.days,
+                              _bbox(",".join(map(str, req.bbox))) if req.bbox else None)
+    except FileNotFoundError as exc:
+        raise HTTPException(503, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+@app.post("/api/interpret")
+def interpret(req: InterpretRequest):
+    """ROI dayanak özeti → DeepSeek Türkçe AI bakışı."""
+    if not req.polygon or len(req.polygon) < 3:
+        raise HTTPException(422, "AI bakışı için poligon gerekli (≥ 3 köşe).")
+    try:
+        return _st().interpret_roi(
+            polygon=req.polygon,
+            focus=req.focus,
+            section=req.section or "overview",
+            question=req.question,
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(503, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc

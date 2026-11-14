@@ -1,8 +1,7 @@
-"""Automated Tactical Incident Commander Briefing (Markdown + JSON).
+"""Taktik olay komutanı brifingi (Markdown + JSON) — Türkçe.
 
-Every number in the briefing is computed from the analysed data; the only
-rule-based content is the alert level and the recommended-actions checklist,
-which are explicit threshold rules shown in the text.
+Her sayı analiz edilen veriden gelir; kural tabanlı içerik yalnızca uyarı seviyesi
+ve önerilen eylem listesidir (eşikler metinde açıkça yazılır).
 """
 from __future__ import annotations
 
@@ -14,7 +13,7 @@ from src.engine.diurnal_normalizer import PARAMS, diurnal_factor, nominal_day_ls
 
 
 def diurnal_outlook(lon: float, now_utc: dt.datetime | None = None, hours: int = 24, step: int = 3) -> list:
-    """Expected relative fire intensity for the next ``hours`` at an AOI longitude."""
+    """AOI boylamında önümüzdeki ``hours`` saat için göreli yangın yoğunluğu."""
     now = now_utc or dt.datetime.now(dt.timezone.utc).replace(tzinfo=None)
     out = []
     for h in range(0, hours + 1, step):
@@ -26,11 +25,11 @@ def diurnal_outlook(lon: float, now_utc: dt.datetime | None = None, hours: int =
 
 
 def overpass_schedule(lon: float, year_frac: float = 2026.87) -> list:
-    """Nominal overpass local times (drift-aware) converted to UTC at the AOI longitude."""
+    """Nominal geçiş yerel saatlerini (kayma düzeltilmiş) AOI boylamında UTC'ye çevirir."""
     rows = []
     for sat in ("Terra", "Aqua", "SNPP", "NOAA20"):
         day = float(nominal_day_lst(sat, np.array([year_frac]))[0])
-        for label, lst in (("day", day), ("night", (day + 12.0) % 24.0)):
+        for label, lst in (("gündüz", day), ("gece", (day + 12.0) % 24.0)):
             utc = (lst - lon / 15.0) % 24.0
             rows.append({"satellite": sat, "pass": label, "local_solar_time": f"{int(lst):02d}:{int((lst % 1) * 60):02d}",
                          "utc": f"{int(utc):02d}:{int((utc % 1) * 60):02d}"})
@@ -39,22 +38,27 @@ def overpass_schedule(lon: float, year_frac: float = 2026.87) -> list:
 
 def _alert(z: float | None) -> tuple[str, str]:
     if z is None:
-        return "UNRATED", "no climatology available for this scope"
+        return "DERECELENDİRİLMEDİ", "Bu kapsam için iklimsel (yılın günü) karşılaştırma yok — uyarı seviyesi hesaplanamadı"
     if z >= 3:
-        return "EXTREME", f"harmonized activity z = {z:+.1f} (>= +3 vs 25-yr day-of-year climatology)"
+        return "AŞIRI", f"harmonize etkinlik z = {z:+.1f} (≥ +3; 25 yıllık yılın-günü iklimine göre)"
     if z >= 2:
-        return "ELEVATED", f"harmonized activity z = {z:+.1f} (>= +2)"
+        return "YÜKSEK", f"harmonize etkinlik z = {z:+.1f} (≥ +2)"
     if z <= -2:
-        return "SUPPRESSED", f"harmonized activity z = {z:+.1f} (<= -2)"
-    return "NORMAL", f"harmonized activity z = {z:+.1f} (within +/-2)"
+        return "BASKILANMIŞ", f"harmonize etkinlik z = {z:+.1f} (≤ −2)"
+    return "NORMAL", f"harmonize etkinlik z = {z:+.1f} (±2 içinde)"
 
 
 def _fmt(v, nd=0):
-    return "n/a" if v is None else f"{v:,.{nd}f}"
+    return "yok" if v is None else f"{v:,.{nd}f}"
+
+
+def _is_local_val(val: dict) -> bool:
+    """ROI yerel doğrulama mı (hold-out bölgesel değil)?"""
+    return bool(val) and "rmse_raw" in val and "holdout_2022_2026" not in val
 
 
 def generate(ctx: dict) -> dict:
-    """ctx keys: scope, window, totals, top_cells, climate (optional), drivers, diurnal, quality, validation, centre."""
+    """ctx anahtarları: scope, window, totals, top_cells, climate, drivers, quality, validation, centre."""
     totals = ctx.get("totals", {}) or {}
     clim = ctx.get("climate") or {}
     z = clim.get("recent_z")
@@ -68,6 +72,7 @@ def generate(ctx: dict) -> dict:
     drivers = (ctx.get("drivers") or {}).get("frp") or []
     q = ctx.get("quality") or {}
     val = ctx.get("validation") or {}
+    historical = bool(q.get("historical"))
 
     est, lo, hi = totals.get("harmonized"), totals.get("harmonized_lo90"), totals.get("harmonized_hi90")
     raw = totals.get("raw_total")
@@ -75,73 +80,139 @@ def generate(ctx: dict) -> dict:
     low_n = totals.get("lowconf_removed", 0)
 
     actions = []
-    if level in ("EXTREME", "ELEVATED"):
-        actions.append("Raise staffing / pre-position resources: activity is above the historical envelope.")
+    if level in ("AŞIRI", "YÜKSEK", "EXTREME", "ELEVATED"):
+        actions.append("Personel / kaynakları öne al: etkinlik tarihsel zarfın üzerinde.")
     if static_n:
-        actions.append(f"Do **not** dispatch to the {static_n:,} persistent-source detections (flares / plants / volcanoes) - already excluded.")
+        actions.append(
+            f"**{static_n:,}** kalıcı kaynak tespitine (flare / tesis / volkan) müdahale etme — zaten dışlandı."
+        )
     if top:
-        actions.append(f"Prioritise hex `{top[0]['h3']}` (~{top[0]['harmonized']:.1f} VIIRS-scale hotspots) for first-look imagery.")
-    actions.append(f"Plan fireline work for the intensity trough (~{trough['utc']} UTC, relative intensity {trough['relative_intensity']:.2f}); "
-                   f"expect peak spread near {peak['utc']} UTC (relative {peak['relative_intensity']:.2f}).")
-    if q.get("non_live"):
-        actions.append("Treat figures as **non-live**: refresh when FIRMS connectivity is restored.")
+        actions.append(
+            f"İlk bakış görüntüsü için hex `{top[0]['h3']}` (~{top[0]['harmonized']:.1f} VIIRS-ölçekli sıcak nokta) önceliklendir."
+        )
+    actions.append(
+        f"Yoğunluk çukuru (~{trough['utc']} UTC, göreli {trough['relative_intensity']:.2f}) için hat planla; "
+        f"tepe yayılım ~{peak['utc']} UTC (göreli {peak['relative_intensity']:.2f}) beklenir."
+    )
+    if q.get("non_live") and not historical:
+        actions.append("Rakamlar **canlı değil**: FIRMS bağlantısı düzelince yenile.")
+    if historical:
+        actions.append("Bu brifing **tarihsel arşiv** özetidir; anlık operasyon için Canlı NASA FIRMS modunu kullan.")
 
     md = []
-    md.append(f"# TACTICAL INCIDENT COMMANDER BRIEFING - AETHER-FIRE")
-    md.append(f"**Scope:** {ctx.get('scope', 'n/a')}  \n**Window:** {ctx.get('window', 'n/a')}  \n"
-              f"**Generated:** {dt.datetime.now(dt.timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}  \n"
-              f"**Data basis:** {q.get('basis', 'n/a')}")
-    md.append(f"\n## 1. Alert level: **{level}**\n{level_reason}.")
-    md.append("\n## 2. Situation (sensor-harmonized)")
-    md.append(f"- Raw detections as reported (MODIS + VIIRS): **{_fmt(raw)}**")
-    md.append(f"- Persistent thermal sources removed: **{_fmt(static_n)}**; low-confidence removed: **{_fmt(low_n)}**")
+    md.append("# TAKTİK OLAY KOMUTANI BRİFİNGİ — AETHER-FIRE / Alaz")
+    md.append(
+        f"**Kapsam:** {ctx.get('scope', 'yok')}  \n"
+        f"**Pencere:** {ctx.get('window', 'yok')}  \n"
+        f"**Üretim:** {dt.datetime.now(dt.timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}  \n"
+        f"**Veri dayanağı:** {q.get('basis', 'yok')}"
+    )
+    md.append(f"\n## 1. Uyarı seviyesi: **{level}**\n{level_reason}.")
+
+    md.append("\n## 2. Durum (sensör-harmonize)")
+    md.append(f"- Ham tespit (MODIS + VIIRS, raporlandığı gibi): **{_fmt(raw)}**")
+    md.append(f"- Kalıcı termal kaynak çıkarılan: **{_fmt(static_n)}**; düşük güven çıkarılan: **{_fmt(low_n)}**")
     if lo is not None and hi is not None and (hi - lo) > 1e-6:
-        ci_txt = f"90% CI {_fmt(lo, 1)} - {_fmt(hi, 1)}"
+        ci_txt = f"%90 GA {_fmt(lo, 1)} – {_fmt(hi, 1)}"
     else:
-        ci_txt = "VIIRS-native reference period: no cross-sensor estimation uncertainty"
-    md.append(f"- Harmonized, VIIRS-equivalent hotspot count: **{_fmt(est, 1)}** ({ci_txt})")
+        ci_txt = "VIIRS-yerel referans: çapraz-sensör belirsizlik yok"
+    md.append(f"- Harmonize, VIIRS-eşdeğeri sıcak nokta: **{_fmt(est, 1)}** ({ci_txt})")
     if totals.get("frp_harm_mean") is not None:
-        md.append(f"- Mean harmonized FRP per detection: **{_fmt(totals.get('frp_harm_mean'), 1)} MW** "
-                  f"(raw mean {_fmt(totals.get('frp_raw_mean'), 1)} MW)")
+        md.append(
+            f"- Ortalama harmonize FRP / tespit: **{_fmt(totals.get('frp_harm_mean'), 1)} MW** "
+            f"(ham ortalama {_fmt(totals.get('frp_raw_mean'), 1)} MW)"
+        )
     if raw and est:
-        md.append(f"- Raw-to-harmonized ratio: {raw / max(est, 1e-9):.2f}x "
-                  "(raw counts add up every platform's overpasses of the same fires - up to 4 satellites - plus persistent "
-                  "and low-confidence pixels; harmonized counts are per single VIIRS-equivalent platform)")
-    md.append("\n## 3. Priority hexagons (H3 res-7, ~5.2 km2)")
+        md.append(
+            f"- Ham / harmonize oranı: {raw / max(est, 1e-9):.2f}× "
+            "(ham sayım tüm platform geçişlerini toplar — en fazla 4 uydu — artı kalıcı ve düşük güven pikseller; "
+            "harmonize tek VIIRS-eşdeğeri platforma göredir)"
+        )
+
+    md.append("\n## 3. Öncelikli altıgenler (H3 res-7, ~5,2 km²)")
     if top:
-        md.append("| H3 cell | Raw | Harmonized (P50) | 90% CI | Mean FRP (MW) |\n|---|---:|---:|---:|---:|")
+        md.append("| H3 hücre | Ham | Harmonize (P50) | %90 GA | Ort. FRP (MW) |\n|---|---:|---:|---:|---:|")
         for c in top[:8]:
-            md.append(f"| `{c['h3']}` | {c['raw_total']} | {c['harmonized']:.1f} | {c['lo90']:.1f}-{c['hi90']:.1f} | {c['frp_harm_mean']:.1f} |")
+            md.append(
+                f"| `{c['h3']}` | {c['raw_total']} | {c['harmonized']:.1f} | "
+                f"{c['lo90']:.1f}–{c['hi90']:.1f} | {c['frp_harm_mean']:.1f} |"
+            )
     else:
-        md.append("_No active hexagons in this scope._")
-    md.append("\n## 4. Behaviour & timing")
-    md.append(f"- Fire intensity follows a Gaussian diurnal cycle peaking {PARAMS.peak_hour:.1f} h local solar time. "
-              f"Over the next 24 h at this longitude the expected maximum is **{peak['utc']} UTC** and the minimum **{trough['utc']} UTC**.")
-    md.append("- Nominal overpasses at the AOI (UTC): " + "; ".join(
-        f"{s['satellite']} {s['pass']} {s['utc']}" for s in sched if s["pass"] == "day") + ".")
-    md.append("- Terra and Aqua are drifting from their 10:30 / 13:30 orbits; their FRP is rescaled to the SNPP reference time before comparison.")
+        md.append("_Bu kapsamda aktif altıgen yok._")
+
+    md.append("\n## 4. Davranış ve zamanlama")
+    md.append(
+        f"- Yangın yoğunluğu yerel güneş saatinde {PARAMS.peak_hour:.1f} saatte tepe yapan Gauss gün döngüsünü izler. "
+        f"Bu boylamda önümüzdeki 24 saatte beklenen maksimum **{peak['utc']} UTC**, minimum **{trough['utc']} UTC**."
+    )
+    md.append(
+        "- AOI’de nominal gündüz geçişleri (UTC): "
+        + "; ".join(f"{s['satellite']} {s['pass']} {s['utc']}" for s in sched if s["pass"] == "gündüz")
+        + "."
+    )
+    md.append(
+        "- Terra ve Aqua 10:30 / 13:30 yörüngelerinden kayıyor; FRP’leri karşılaştırmadan önce SNPP referans saatine ölçeklenir."
+    )
+
+    sec = 5
     if drivers:
-        md.append("\n## 5. Why MODIS hotspots were rescaled")
+        md.append(f"\n## {sec}. MODIS sıcak noktaları neden yeniden ölçeklendi")
         for d in drivers[:4]:
-            md.append(f"- **{d['driver']}**: {d['mean_effect_pct']:+.0f}% on harmonized FRP (typical range {d['p10']:+.0f}% to {d['p90']:+.0f}%)")
+            md.append(
+                f"- **{d['driver']}**: harmonize FRP üzerinde {d['mean_effect_pct']:+.0f}% "
+                f"(tipik aralık {d['p10']:+.0f}% … {d['p90']:+.0f}%)"
+            )
+        sec += 1
+
     if clim:
-        md.append("\n## 6. Climatological context")
-        md.append(f"- Latest 7-day harmonized mean vs 25-yr median for these days: z = {clim.get('recent_z')}.")
+        md.append(f"\n## {sec}. İklimsel bağlam")
+        md.append(
+            f"- Son 7 günlük harmonize ortalama vs bu günlerin 25 yıllık medyanı: z = {clim.get('recent_z')}."
+        )
         for e in (clim.get("episodes") or [])[:3]:
-            md.append(f"- Anomalous episode {e['start']} to {e['end']} ({e['days']} d, peak z {e['peak_z']:+.1f})")
-    md.append("\n## 7. Recommended actions (rule-based)")
+            md.append(
+                f"- Anomalik dönem {e['start']} → {e['end']} ({e['days']} gün, tepe z {e['peak_z']:+.1f})"
+            )
+        sec += 1
+
+    md.append(f"\n## {sec}. Önerilen eylemler (kural tabanlı)")
     md.extend(f"{i + 1}. {a}" for i, a in enumerate(actions))
-    md.append("\n## 8. Confidence & caveats")
-    if val:
-        h = val.get("holdout_2022_2026") or {}
-        md.append(f"- Hold-out validation (MODIS-derived vs VIIRS native): RMSE reduction {h.get('rmse_reduction_pct', float('nan')):.0f}%, "
-                  f"relative bias {h.get('relative_bias_harmonized_pct', float('nan')):+.1f}% (raw {h.get('relative_bias_raw_pct', float('nan')):+.0f}%), "
-                  f"90% CI coverage {h.get('ci90_coverage', float('nan')):.0%}.")
+    sec += 1
+
+    md.append(f"\n## {sec}. Güven ve uyarılar")
+    if _is_local_val(val):
+        red = val.get("rmse_reduction_pct", float("nan"))
+        note = (
+            "harmonize bu ROI’de VIIRS’e yaklaştırıyor"
+            if isinstance(red, (int, float)) and red > 0
+            else "harmonize bu ROI’de VIIRS’e yaklaştırmıyor — Ham seriyi tercih et"
+        )
+        md.append(
+            f"- Bu ROI’de yerel doğrulama (MODIS → VIIRS, örtüşen aylar): "
+            f"RMSE ham {_fmt(val.get('rmse_raw'), 1)} → harmonize {_fmt(val.get('rmse_harmonized'), 1)} "
+            f"(değişim {red:+.0f}%); göreli sapma ham "
+            f"{val.get('relative_bias_raw_pct', float('nan')):+.0f}% → harmonize "
+            f"{val.get('relative_bias_harmonized_pct', float('nan')):+.1f}% "
+            f"(n={_fmt(val.get('n'))} ay). {note}."
+        )
+    elif val:
+        h = val.get("holdout_2022_2026") or val
+        if "rmse_reduction_pct" in h:
+            md.append(
+                f"- Hold-out doğrulama (MODIS-türev vs VIIRS yerel): RMSE azalması "
+                f"{h.get('rmse_reduction_pct', float('nan')):.0f}%, göreli sapma "
+                f"{h.get('relative_bias_harmonized_pct', float('nan')):+.1f}% "
+                f"(ham {h.get('relative_bias_raw_pct', float('nan')):+.0f}%), "
+                f"%90 GA kapsama {h.get('ci90_coverage', float('nan')):.0%}."
+            )
     if q.get("synthetic"):
-        md.append("- The benchmark archive is a **physically simulated** record (known ground truth), not NASA observations.")
+        md.append("- Benchmark arşivi **fiziksel olarak simüle** edilmiş kayıttır (bilinen yer gerçeği), NASA gözlemi değildir.")
     for n in q.get("notes", []):
         md.append(f"- {n}")
-    md.append("- Biome classes are a latitude/region proxy for MCD12Q1 land cover; FRP harmonization applies to MODIS-detected footprints only.")
+    md.append(
+        "- Biyom sınıfları MCD12Q1 arazi örtüsü için enlem/bölge vekilidir; "
+        "FRP harmonizasyonu yalnızca MODIS tespit ayak izlerine uygulanır."
+    )
     markdown = "\n".join(md)
 
     payload = {

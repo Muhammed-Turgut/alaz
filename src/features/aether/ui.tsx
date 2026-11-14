@@ -53,6 +53,26 @@ export function Hint({ children }: { children: ReactNode }) {
   return <p className={styles.hint}>{children}</p>;
 }
 
+/** ROI yokken ortak boş durum: mesaj + haritada poligon çizmeye dönüş. */
+export function EmptyRoi({
+  message,
+  onDraw,
+}: {
+  message: string;
+  onDraw?: () => void;
+}) {
+  return (
+    <div className={styles.emptyRoi}>
+      <p className={styles.banner}>{message}</p>
+      {onDraw && (
+        <button type="button" className={styles.emptyRoiBtn} onClick={onDraw}>
+          Haritada poligon çiz
+        </button>
+      )}
+    </div>
+  );
+}
+
 /** Chart.js tuvali: `draw` değiştikçe grafik yeniden kurulur, çıkışta yok edilir. */
 export function ChartBox({ draw, height = 300, title }: { draw: (c: HTMLCanvasElement) => Chart; height?: number; title?: string }) {
   const ref = useRef<HTMLCanvasElement>(null);

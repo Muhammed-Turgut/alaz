@@ -1,26 +1,18 @@
-import { useEffect, useState } from "react";
-
 import { Button } from "@/components/ui/Button";
-import { presetsFor } from "./format";
 import { APP_CONFIG, type ConfidenceKey } from "./live/config";
 import type { LiveFires } from "./live/useLiveFires";
-import type { Region, Source } from "./types";
+import type { ArchiveStatus, Source } from "./types";
 import { Seg } from "./ui";
 import { viz } from "./viz";
 import styles from "./aether.module.css";
 
 interface Props {
-  regions: Region[];
   source: Source;
-  region: string;
-  start: string;
-  end: string;
   roiHint: string;
   drawing: boolean;
   live: LiveFires;
+  archive: ArchiveStatus | null;
   onSource: (s: Source) => void;
-  onRegion: (r: string) => void;
-  onWindow: (start: string, end: string) => void;
   onDraw: () => void;
   onFinish: () => void;
   onClearRoi: () => void;
@@ -28,19 +20,6 @@ interface Props {
 }
 
 export function Sidebar(p: Props) {
-  const [s, setS] = useState(p.start);
-  const [e, setE] = useState(p.end);
-  const [err, setErr] = useState("");
-  useEffect(() => { setS(p.start); setE(p.end); }, [p.start, p.end]);
-  const presets = presetsFor(p.region);
-
-  const apply = () => {
-    if (!s || !e) return setErr("Başlangıç ve bitiş tarihini seç.");
-    if (s > e) return setErr("Başlangıç, bitişten sonra olamaz.");
-    setErr("");
-    p.onWindow(s, e);
-  };
-
   const lv = p.live;
   const metas = [lv.meta.VIIRS, lv.meta.MODIS].filter((x) => x !== null);
   const tiers = [...new Set(metas.flatMap((x) => x.tiers))];
@@ -51,37 +30,22 @@ export function Sidebar(p: Props) {
     <aside className={styles.sidebar}>
       <section className={styles.ctl}>
         <h4>Veri kaynağı</h4>
-        <Seg value={p.source} onChange={p.onSource}
-          options={[{ v: "live", label: "Canlı NASA FIRMS" }, { v: "benchmark", label: "Benchmark 2001-2026" }]} />
+        <Seg
+          value={p.source}
+          onChange={p.onSource}
+          options={[
+            { v: "live", label: "Canlı NASA FIRMS" },
+            { v: "archive", label: "Gerçek arşiv (TR)" },
+          ]}
+        />
         <p className={styles.hint}>
-          {p.source === "benchmark"
-            ? "Bilinen gerçeğe sahip, fiziksel olarak simüle edilmiş arşiv. NASA gözlemi değildir."
-            : "NASA FIRMS yakın-gerçek-zamanlı (son 24 saat) MODIS + VIIRS tespitleri. Çevrimdışıyken önbellek / paketli gerçek örneğe düşer ve bu her zaman belirtilir; sentetik veri gösterilmez."}
+          {p.source === "archive"
+            ? "Türkiye kapsamasındaki gerçek NASA FIRMS MODIS+VIIRS geçmişi. Haritada alan çiz → Yanma takvimi."
+            : "NASA FIRMS yakın-gerçek-zamanlı (son 24 saat) MODIS + VIIRS tespitleri. Çevrimdışıyken önbellek / paketli gerçek örneğe düşer; sentetik veri gösterilmez."}
         </p>
       </section>
 
-      {p.source === "benchmark" ? (
-        <section className={styles.ctl}>
-          <h4>Bölge ve pencere</h4>
-          <label>Bölge
-            <select value={p.region} onChange={(ev) => p.onRegion(ev.target.value)}>
-              {p.regions.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
-            </select>
-          </label>
-          <label>Hazır pencere
-            <select value="" onChange={(ev) => { const pr = presets[Number(ev.target.value)]; if (pr) p.onWindow(pr.start, pr.end); }}>
-              <option value="" disabled>Seç...</option>
-              {presets.map((pr, i) => <option key={pr.label} value={i}>{pr.label}</option>)}
-            </select>
-          </label>
-          <div className={styles.row2}>
-            <label>Başlangıç<input type="date" value={s} min="2001-01-01" max="2026-11-14" onChange={(ev) => setS(ev.target.value)} /></label>
-            <label>Bitiş<input type="date" value={e} min="2001-01-01" max="2026-11-14" onChange={(ev) => setE(ev.target.value)} /></label>
-          </div>
-          <Button variant="secondary" className={styles.full} onClick={apply}>Pencereyi uygula</Button>
-          {err && <p className={styles.errText}>{err}</p>}
-        </section>
-      ) : (
+      {p.source === "live" && (
         <>
           <section className={styles.ctl}>
             <h4>Canlı veri</h4>
@@ -97,6 +61,20 @@ export function Sidebar(p: Props) {
           </section>
           <LiveFilters live={lv} />
         </>
+      )}
+
+      {p.source === "archive" && (
+        <section className={styles.ctl}>
+          <h4>Gerçek arşiv</h4>
+          <div className={styles.metaBox}>
+            {p.archive?.available
+              ? `${p.archive.name ?? "Türkiye"}\n${p.archive.partial ? "indiriliyor" : "hazır"} · ${p.archive.done_chunks}/${p.archive.total_chunks} dilim\nmaks. alan ≈ ${(p.archive.max_area_km2 ?? 50000).toLocaleString("tr-TR")} km²`
+              : "Arşiv henüz yok veya yüklenemedi."}
+          </div>
+          <p className={styles.hint}>
+            Haritada poligon çiz. Takvim, kırılma, brifing ve model bu alan üzerinden hesaplanır.
+          </p>
+        </section>
       )}
 
       <section className={styles.ctl}>
@@ -141,11 +119,11 @@ function LiveFilters({ live }: { live: LiveFires }) {
         </label>
       ))}
       <div className={styles.rangeBox}>
-        <label>Parlaklık sıcaklığı alt sınırı
+        <label>Parlaklık sıcaklığı alt (°C, K−273)
           <input type="range" min={f.bounds.minTemp} max={f.bounds.maxTemp} step={step} value={lo}
             onChange={(ev) => live.setTempRange(Number(ev.target.value), hi)} />
         </label>
-        <label>Üst sınır
+        <label>Üst sınır (°C)
           <input type="range" min={f.bounds.minTemp} max={f.bounds.maxTemp} step={step} value={hi}
             onChange={(ev) => live.setTempRange(lo, Number(ev.target.value))} />
         </label>

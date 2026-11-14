@@ -5,7 +5,7 @@ from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
-Source = Literal["benchmark", "live"]
+Source = Literal["benchmark", "live", "archive"]
 
 
 class ROIRequest(BaseModel):
@@ -54,6 +54,58 @@ class BriefingRequest(BaseModel):
     polygon: Optional[list[list[float]]] = None
     days: int = Field(1, ge=1, le=7)
     bbox: Optional[list[float]] = None
+
+
+class AreaScopeRequest(BaseModel):
+    """Gerçek FIRMS arşivinden seçilen alan (takvim / seri / kırılma ortak gövde).
+
+    bbox: [west, south, east, north] (NASA / arşiv sırası).
+    polygon: [[lat, lon], ...] — verilirse bbox poligondan türetilir.
+    """
+    polygon: Optional[list[list[float]]] = None
+    bbox: Optional[list[float]] = None
+    force: bool = False
+
+    @field_validator("polygon")
+    @classmethod
+    def _poly(cls, v):
+        if v is None:
+            return v
+        if len(v) < 3:
+            raise ValueError("polygon needs at least 3 vertices")
+        for p in v:
+            if len(p) != 2 or not (-90 <= p[0] <= 90) or not (-180 <= p[1] <= 180):
+                raise ValueError("vertices must be [lat, lon] within valid ranges")
+        return v
+
+    @field_validator("bbox")
+    @classmethod
+    def _bbox(cls, v):
+        if v is None:
+            return v
+        if len(v) != 4:
+            raise ValueError("bbox must be [west, south, east, north]")
+        w, s, e, n = v
+        if not (-180 <= w < e <= 180 and -90 <= s < n <= 90):
+            raise ValueError("bbox out of range")
+        return v
+
+
+class AreaCalendarRequest(AreaScopeRequest):
+    series: Literal["harmonized", "raw"] = "harmonized"
+    target_year: Optional[int] = Field(None, ge=2000, le=2100)
+    month: Optional[int] = Field(None, ge=1, le=12)
+
+
+class AreaSeriesRequest(AreaScopeRequest):
+    freq: Literal["monthly", "annual"] = "monthly"
+
+
+class InterpretRequest(AreaScopeRequest):
+    """DeepSeek AI bakışı — ROI sayı özeti + odak sekmesi + tablo bölümü."""
+    focus: Literal["break", "calendar", "model", "briefing"] = "break"
+    section: str = Field("overview", max_length=64, description="Tablo/kart kimliği")
+    question: Optional[str] = Field(None, max_length=500)
 
 
 class HealthResponse(BaseModel):

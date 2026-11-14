@@ -1,4 +1,4 @@
-export type Source = "benchmark" | "live";
+export type Source = "live" | "archive";
 export type Sensor = "all" | "MODIS" | "VIIRS";
 export type BBox = [number, number, number, number]; // south, west, north, east
 export type LatLng = [number, number];
@@ -161,7 +161,7 @@ export interface BreakReport {
   pettitt_annual: TestResult;
   chow_monthly: TestResult;
   chow_annual: TestResult;
-  step: { pre_mean: number; post_mean: number; step_pct: number };
+  step: { pre_mean: number | null; post_mean: number | null; step_pct: number | null };
 }
 export interface BreakPayload {
   region: string;
@@ -180,6 +180,64 @@ export interface CalendarPayload {
     n_days: number; n_positive: number; n_negative: number; max_z: number | null;
     episodes: { start: string; end: string; days: number; peak_z: number }[];
   };
+}
+
+export interface MonthYearMatrix {
+  years: number[];
+  months: number[];
+  matrix: (number | null)[][];
+  totals_by_month: number[];
+}
+
+export interface MonthVsMedian {
+  available: boolean;
+  year?: number;
+  month?: number;
+  month_total?: number;
+  historical_median?: number | null;
+  ratio?: number | null;
+  percentile?: number | null;
+  n_years?: number;
+  historical_p10?: number;
+  historical_p90?: number;
+}
+
+export interface AreaCalendarResult {
+  empty: boolean;
+  message?: string;
+  series?: "harmonized" | "raw";
+  meta?: {
+    area_km2?: number;
+    rows?: number;
+    raw_count?: number;
+    detections?: number;
+    date_range?: [string | null, string | null];
+    state?: string;
+    done_chunks?: number;
+    total_chunks?: number;
+    partial?: boolean;
+    model?: string;
+    model_note?: string;
+    counts?: { raw_all: number; raw_modis: number; raw_viirs: number; static_removed: number };
+  };
+  calendar?: CalendarPayload;
+  month_year?: MonthYearMatrix;
+  current_month_vs_median?: MonthVsMedian;
+  local_validation?: Record<string, number>;
+}
+
+export interface ArchiveStatus {
+  area_id: string;
+  name?: string;
+  available: boolean;
+  state: string;
+  done_chunks: number;
+  total_chunks: number;
+  failed_chunks?: number;
+  bbox?: { west: number; south: number; east: number; north: number };
+  max_area_km2?: number;
+  rows_cached?: number;
+  partial?: boolean;
 }
 
 export interface DiurnalModel {
@@ -247,7 +305,7 @@ export interface Health {
 
 export interface Scope {
   source: Source;
-  region: string;
+  region: string | null;
   start: string;
   end: string;
   days: number;

@@ -1,12 +1,12 @@
-import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 
 import { Button } from "@/components/ui/Button";
 import { usePrefs } from "@/lib/preferences";
 import { api } from "./api";
-import { diurnalChart, driftChart, driverChart, drawGeometry } from "./charts";
+import { driverChart, drawGeometry } from "./charts";
 import { fmt } from "./format";
-import type { GeometryPayload, HarmonizedDetection, ModelPayload } from "./types";
-import { Badge, Card, ChartBox, Hint, MiniChart } from "./ui";
+import type { GeometryPayload, HarmonizedDetection, LatLng, Source } from "./types";
+import { Badge, Card, Hint, MiniChart } from "./ui";
 import styles from "./aether.module.css";
 
 function GeometryCard({ g, visible }: { g: GeometryPayload; visible: boolean }) {
@@ -17,11 +17,16 @@ function GeometryCard({ g, visible }: { g: GeometryPayload; visible: boolean }) 
   useEffect(() => {
     const el = wrap.current;
     if (!el) return;
-    const ro = new ResizeObserver(() => setWidth(el.clientWidth));
+    const measure = () => {
+      const w = el.clientWidth;
+      if (w >= 100) setWidth(w);
+    };
+    const ro = new ResizeObserver(measure);
     ro.observe(el);
-    setWidth(el.clientWidth);
+    measure();
+    if (visible) requestAnimationFrame(measure);
     return () => ro.disconnect();
-  }, []);
+  }, [g, visible]);
   useEffect(() => {
     if (canvas.current && width > 100 && visible) drawGeometry(canvas.current, g, width);
   }, [g, width, visible, theme]);
@@ -29,7 +34,11 @@ function GeometryCard({ g, visible }: { g: GeometryPayload; visible: boolean }) 
     <Card title="Bow-tie piksel ayak izi">
       <div ref={wrap}><canvas ref={canvas} /></div>
       <Hint>
-        MODIS: {g.modis.half_swath_km} km yarı-şerit; VIIRS 375 m: {g.viirs.half_swath_km} km. H3 res-7 = {g.h3.res7_km2} km², res-8 = {g.h3.res8_km2} km². {g.note}
+        MODIS: {g.modis.half_swath_km} km yarı-şerit; VIIRS 375 m: {g.viirs.half_swath_km} km.
+        H3 res-7 = {g.h3.res7_km2} km², res-8 = {g.h3.res8_km2} km².{" "}
+        {g.note?.startsWith("VIIRS angle")
+          ? "VIIRS açı ekseni kendi yarı-şeridine ölçeklenir; her iki sensör nadirden kenara aynı aralığı kaplar."
+          : g.note}
       </Hint>
       <table className={styles.tbl}>
         <thead><tr><th>Açı</th><th>MODIS tarama x iz (km)</th><th>MODIS alan (km²)</th><th>VIIRS piksel (km)</th></tr></thead>
@@ -49,11 +58,32 @@ function GeometryCard({ g, visible }: { g: GeometryPayload; visible: boolean }) 
 }
 
 const SATS = ["Aqua", "Terra", "SNPP", "NOAA20"];
+const TR_DEFAULT = { lat: 39.0, lon: 35.2, date: "2021-08-05", time: 1100 };
 
-function HarmonizeCard() {
+function roiCentroid(roi: LatLng[] | null): { lat: number; lon: number } | null {
+  if (!roi || roi.length < 3) return null;
+  const n = roi.length;
+  const lat = roi.reduce((s, p) => s + p[0], 0) / n;
+  const lon = roi.reduce((s, p) => s + p[1], 0) / n;
+  return { lat: Math.round(lat * 1000) / 1000, lon: Math.round(lon * 1000) / 1000 };
+}
+
+function HarmonizeCard({ source, roi }: { source: Source; roi: LatLng[] | null }) {
   const [res, setRes] = useState<HarmonizedDetection | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+
+  const defaults = useMemo(() => {
+    const c = roiCentroid(roi);
+    return {
+      lat: c?.lat ?? TR_DEFAULT.lat,
+      lon: c?.lon ?? TR_DEFAULT.lon,
+      date: TR_DEFAULT.date,
+      time: TR_DEFAULT.time,
+    };
+  }, [roi]);
+
+  const formKey = `${source}-${defaults.lat}-${defaults.lon}`;
 
   const submit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -79,11 +109,14 @@ function HarmonizeCard() {
 
   return (
     <Card title="Bir tespiti harmonize et">
-      <form onSubmit={submit} className={styles.formGrid}>
-        <label>Enlem<input name="latitude" type="number" step="any" defaultValue="38.0" required /></label>
-        <label>Boylam<input name="longitude" type="number" step="any" defaultValue="-121.8" required /></label>
-        <label>Tarih (UTC)<input name="acq_date" type="date" defaultValue="2026-08-10" required /></label>
-        <label>Saat (UTC, HHMM)<input name="acq_time" type="number" min={0} max={2359} defaultValue={2130} required /></label>
+      <Hint>
+        Varsayılan koordinat {roi && roi.length >= 3 ? "çizdiğin ROI merkezi" : "Türkiye içi"}.
+      </Hint>
+      <form key={formKey} onSubmit={submit} className={styles.formGrid}>
+        <label>Enlem<input name="latitude" type="number" step="any" defaultValue={defaults.lat} required /></label>
+        <label>Boylam<input name="longitude" type="number" step="any" defaultValue={defaults.lon} required /></label>
+        <label>Tarih (UTC)<input name="acq_date" type="date" defaultValue={defaults.date} required /></label>
+        <label>Saat (UTC, HHMM)<input name="acq_time" type="number" min={0} max={2359} defaultValue={defaults.time} required /></label>
         <label>Uydu
           <select name="satellite" defaultValue="Aqua">{SATS.map((s) => <option key={s}>{s}</option>)}</select>
         </label>
@@ -123,37 +156,35 @@ function HarmonizeCard() {
   );
 }
 
-export function ExplainTab({ visible }: { visible: boolean }) {
+export function ExplainTab({
+  visible,
+  source,
+  roi,
+}: {
+  visible: boolean;
+  source: Source;
+  roi: LatLng[] | null;
+}) {
   const [geom, setGeom] = useState<GeometryPayload | null>(null);
-  const [model, setModel] = useState<ModelPayload | null>(null);
   const [error, setError] = useState("");
 
   useEffect(() => {
     let live = true;
-    Promise.all([api.geometry(), api.model()])
-      .then(([g, m]) => { if (live) { setGeom(g); setModel(m); } })
+    api.geometry()
+      .then((g) => { if (live) setGeom(g); })
       .catch((e: Error) => live && setError(e.message));
     return () => { live = false; };
   }, []);
-
-  const dm = model?.diurnal;
-  const drawD = useCallback((c: HTMLCanvasElement) => diurnalChart(c, dm!), [dm]);
-  const drawF = useCallback((c: HTMLCanvasElement) => driftChart(c, dm!), [dm]);
 
   return (
     <section>
       <div className={styles.panelHead}><h2>Sıcak nokta açıklayıcı</h2></div>
       {error && <div className={styles.banner}>{error}</div>}
       <div className={styles.grid2}>
-        <HarmonizeCard />
+        <HarmonizeCard source={source} roi={roi} />
         {geom ? <GeometryCard g={geom} visible={visible} /> : <Hint>Yükleniyor...</Hint>}
       </div>
-      {dm && (
-        <div className={styles.grid2}>
-          <ChartBox draw={drawD} height={300} title="Diurnal yangın döngüsü (yerel güneş saati)" />
-          <ChartBox draw={drawF} height={300} title="Terra ve Aqua geçiş saati kayması" />
-        </div>
-      )}
+      <Hint>Piksel geometrisi sensör fiziğidir (bölgeden bağımsız).</Hint>
     </section>
   );
 }

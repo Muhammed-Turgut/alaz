@@ -1,14 +1,17 @@
 export function fmt(v: number | null | undefined, d = 0): string {
   if (v === null || v === undefined || Number.isNaN(v)) return "-";
-  return Number(v).toLocaleString("en-US", { maximumFractionDigits: d, minimumFractionDigits: 0 });
+  return Number(v).toLocaleString("tr-TR", { maximumFractionDigits: d, minimumFractionDigits: 0 });
 }
 
+/** p-değerini okunaklı göster: çok küçükse "< 0,001". */
 export function fmtP(p: number | null | undefined): string {
   if (p === null || p === undefined) return "-";
-  return p < 0.001 ? p.toExponential(1) : p.toFixed(3);
+  if (p < 0.001) return "< 0,001";
+  return p.toLocaleString("tr-TR", { minimumFractionDigits: 3, maximumFractionDigits: 3 });
 }
 
-export function signed(v: number, d = 0): string {
+export function signed(v: number | null | undefined, d = 0): string {
+  if (v === null || v === undefined || Number.isNaN(v)) return "-";
   return `${v > 0 ? "+" : ""}${v.toFixed(d)}`;
 }
 

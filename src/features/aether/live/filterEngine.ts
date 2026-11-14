@@ -76,13 +76,20 @@ export class FireDataFilter {
   }
 }
 
+/** FIRMS parlaklık sıcaklığı için makul aralık (°C). Aykırı / boş sensör değerlerini slider’dan çıkar. */
+const TEMP_FLOOR = -20;
+const TEMP_CEIL = 180;
+
 function computeBounds(points: FirePoint[]) {
   if (!points.length) return { minTemp: 0, maxTemp: 100 };
   let min = Infinity;
   let max = -Infinity;
   for (const p of points) {
-    if (p.temperatureCelsius < min) min = p.temperatureCelsius;
-    if (p.temperatureCelsius > max) max = p.temperatureCelsius;
+    const t = p.temperatureCelsius;
+    if (t < TEMP_FLOOR || t > TEMP_CEIL) continue;
+    if (t < min) min = t;
+    if (t > max) max = t;
   }
+  if (!Number.isFinite(min) || !Number.isFinite(max)) return { minTemp: 0, maxTemp: 100 };
   return { minTemp: Math.floor(min * 10) / 10, maxTemp: Math.ceil(max * 10) / 10 };
 }

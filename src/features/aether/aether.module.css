@@ -152,7 +152,26 @@
 @media (max-width: 1100px) {
   .grid2 { grid-template-columns: 1fr; }
   .page { grid-template-columns: 1fr; }
-  .sidebar { position: static; height: auto; max-height: 340px; }
+  .sidebar { position: static; height: auto; max-height: 280px; }
+  .mapWrap { height: min(70vh, 520px); }
+  .tabs { flex-wrap: wrap; }
+}
+
+@media (max-width: 640px) {
+  .page { grid-template-columns: 1fr; }
+  .sidebar {
+    position: static;
+    height: auto;
+    max-height: none;
+    border-bottom: 1px solid var(--color-border);
+  }
+  .main { padding: 0 var(--space-3) var(--space-6); }
+  .mapWrap { height: 55vh; min-height: 280px; }
+  .tabs button { font-size: 12px; padding: 6px 8px; }
+  .bandBody { columns: 1; max-height: 220px; }
+  .statusRow { flex-wrap: wrap; gap: 4px; }
+  .panelHead { flex-direction: column; align-items: stretch; gap: var(--space-2); }
+  .inlineCtl { flex-wrap: wrap; }
 }
 
 /* KPI */
@@ -295,7 +314,161 @@
 .formGrid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px var(--space-3); }
 .formActions { grid-column: 1 / -1; }
 .hzResult { margin-top: var(--space-3); }
-.qStrip { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--space-2); margin: var(--space-2) 0; }
+.tblScroll { overflow: auto; max-width: 100%; max-height: min(70vh, 560px); }
+.tblSticky thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--color-surface);
+  box-shadow: 0 1px 0 var(--color-border);
+}
+.emptyRoi {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+.emptyRoi .banner { margin: 0; flex: 1 1 220px; }
+.emptyRoiBtn {
+  padding: 8px 14px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--color-primary-contrast);
+  background: var(--color-primary);
+  border: 0;
+  cursor: pointer;
+}
+.emptyRoiBtn:hover { filter: brightness(1.05); }
+.inlineLink {
+  padding: 0;
+  font: inherit;
+  font-size: inherit;
+  color: var(--color-primary);
+  background: none;
+  border: 0;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.legendGap {
+  margin-top: 6px;
+  padding-top: 4px;
+  border-top: 1px solid var(--color-border);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+/* DeepSeek AI bakışı — tablo/kart altı */
+.aiPanel {
+  margin-top: var(--space-6);
+  padding: var(--space-4);
+  background: var(--color-bg-subtle);
+  border-top: 1px solid var(--color-border);
+}
+.aiPanelCompact {
+  margin-top: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-top: 1px solid var(--color-border);
+  background: var(--color-surface);
+}
+.aiHead {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+.aiPanelCompact .aiHead {
+  align-items: center;
+  margin-bottom: var(--space-2);
+}
+.aiIcon {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  margin-top: 2px;
+  color: var(--color-primary);
+}
+.aiPanelCompact .aiIcon {
+  width: 22px;
+  height: 22px;
+  margin-top: 0;
+}
+.aiHeadText {
+  flex: 1;
+  min-width: 0;
+}
+.aiTitle {
+  margin: 0;
+  font-size: var(--text-base);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.aiPanelCompact .aiTitle {
+  font-size: 13px;
+}
+.aiHint {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+.aiQuickBtn {
+  flex-shrink: 0;
+}
+.aiQuestion {
+  display: block;
+  margin-bottom: var(--space-3);
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+.aiQuestion input,
+.aiQuestionCompact input {
+  display: block;
+  width: 100%;
+  max-width: 520px;
+  margin-top: 4px;
+  padding: 8px 10px;
+  font: inherit;
+  color: var(--color-text);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+}
+.aiQuestionCompact {
+  flex: 1;
+  min-width: 140px;
+}
+.aiQuestionCompact input {
+  margin-top: 0;
+  max-width: none;
+  padding: 6px 8px;
+  font-size: 12px;
+}
+.aiActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+.aiPanelCompact .aiActions {
+  margin-bottom: var(--space-2);
+}
+.aiUsed {
+  margin: 0 0 var(--space-3);
+  padding: var(--space-3);
+  max-height: 220px;
+  overflow: auto;
+  font: 11px var(--font-mono);
+  color: var(--color-text-muted);
+  background: var(--color-surface);
+  white-space: pre-wrap;
+}
+.aiBody {
+  padding-top: var(--space-2);
+  max-width: 90ch;
+}
+.qStrip { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: var(--space-2); margin: var(--space-2) 0; }
 .qStrip div { padding: var(--space-2); text-align: center; background: var(--color-surface); }
 .qStrip b { display: block; font: 700 18px var(--font-mono); color: var(--viz-harmonized); }
 .qStrip span { font-size: 11px; color: var(--color-text-muted); }

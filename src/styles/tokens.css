@@ -74,6 +74,10 @@
   --viz-atmos-low: var(--palette-sky);       /* globe atmosferi */
   --viz-atmos-high: var(--palette-blue);
 
+  /* ---------- Açılış (giriş videosu) — her iki temada aynı ---------- */
+  --intro-bg: var(--palette-black);
+  --intro-scrim: color-mix(in srgb, var(--palette-black) 40%, transparent);   /* video üstü karartma: logo okunsun */
+
   /* ---------- Tipografi ---------- */
   --font-display: "New Amsterdam", "Arial Narrow", system-ui, sans-serif;   /* başlık / marka / etiket */
   --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;

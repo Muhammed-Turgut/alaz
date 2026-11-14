@@ -126,7 +126,7 @@ export class MapView {
     m.setFog({
       color: v.atmosLow,
       "high-color": v.atmosHigh,
-      "space-color": v.text,
+      "space-color": v.space,
       "horizon-blend": 0.04,
       "star-intensity": 0.5,
     });

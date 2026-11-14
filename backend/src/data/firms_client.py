@@ -130,7 +130,9 @@ class FirmsClient:
         try:
             if self.map_key:
                 area = "world" if bbox is None else f"{bbox[1]:.3f},{bbox[0]:.3f},{bbox[3]:.3f},{bbox[2]:.3f}"
-                url = API_URL.format(key=self.map_key, source=source, area=area, days=days)
+                # Alan API'sinde gün sayısı UTC takvim günüdür (1 = yalnız bugün). Açık "24h" beslemesiyle
+                # aynı pencereyi (dün + bugün) vermek için bir gün fazlası istenir; API üst sınırı 5.
+                url = API_URL.format(key=self.map_key, source=source, area=area, days=min(days + 1, 5))
                 r = self.session.get(url, timeout=self.timeout)
                 r.raise_for_status()
                 if r.text.lstrip().lower().startswith("invalid") or "latitude" not in r.text[:300]:
@@ -146,7 +148,8 @@ class FirmsClient:
             else:
                 meta.notes.append("feed returned 0 rows (not cached)")
         except Exception as exc:  # noqa: BLE001 - network is best-effort
-            note = f"{type(exc).__name__}: {str(exc)[:100]}"
+            msg = str(exc).replace(self.map_key, "***") if self.map_key else str(exc)  # anahtar günlüğe/yanıta sızmasın
+            note = f"{type(exc).__name__}: {msg[:100]}"
             log.warning("FIRMS %s fetch failed: %s", source, note)
 
         if raw is not None:

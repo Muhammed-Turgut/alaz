@@ -27,9 +27,10 @@ function cssVar(name: string): string {
 
 export interface VizColors {
   raw: string; harmonized: string; truth: string; fire: string; warn: string; roi: string; selected: string;
-  atmosLow: string; atmosHigh: string;
+  atmosLow: string; atmosHigh: string; space: string;
   text: string; muted: string; surface: string; subtle: string; border: string; mapBg: string;
   ramp: string[];
+  calRamp: string[];
   conf: { HIGH: string; NOMINAL: string; LOW: string; UNKNOWN: string };
   cluster: { small: string; medium: string };
   sat: { Terra: string; Aqua: string; SNPP: string; NOAA20: string };
@@ -44,6 +45,7 @@ export function viz(): VizColors {
     warn: cssVar("--viz-warn"),
     roi: cssVar("--viz-roi"),
     selected: cssVar("--viz-selected"),
+    space: cssVar("--viz-space"),
     atmosLow: cssVar("--viz-atmos-low"),
     atmosHigh: cssVar("--viz-atmos-high"),
     text: cssVar("--color-text"),
@@ -59,6 +61,7 @@ export function viz(): VizColors {
       UNKNOWN: cssVar("--viz-conf-unknown"),
     },
     cluster: { small: cssVar("--viz-cluster-small"), medium: cssVar("--viz-cluster-medium") },
+    calRamp: [0, 1, 2, 3, 4].map((i) => cssVar(`--viz-cal-${i}`)),
     ramp: [0, 1, 2, 3, 4].map((i) => cssVar(`--viz-ramp-${i}`)),
     sat: {
       Terra: cssVar("--viz-sat-terra"),

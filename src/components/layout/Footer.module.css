@@ -1,9 +1,0 @@
-.footer {
-  background: var(--color-bg-subtle);
-}
-
-.inner {
-  padding-block: var(--space-6);
-  font-size: var(--text-sm);
-  color: var(--color-text-muted);
-}

@@ -16,8 +16,7 @@ from typing import Optional
 import pandas as pd
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
-from fastapi.staticfiles import StaticFiles
+from fastapi.responses import JSONResponse, PlainTextResponse
 
 from src.api.schemas import BriefingRequest, HarmonizeRequest, HealthResponse, ROIRequest
 from src.data.fires_feed import FiresFeed
@@ -25,7 +24,6 @@ from src.data.regions import REGIONS
 from src.engine.service import AetherState
 
 log = logging.getLogger("aether.api")
-STATIC_DIR = Path(__file__).resolve().parents[1] / "static"
 
 _state: AetherState | None = None
 _lock = threading.Lock()
@@ -271,13 +269,3 @@ def briefing(req: BriefingRequest):
     rid = _region(req.region) if req.source == "benchmark" else None
     return _st().briefing(req.source, rid, start, end, req.polygon, req.days,
                           _bbox(",".join(map(str, req.bbox))) if req.bbox else None)
-
-
-# --------------------------------------------------------------------- static
-@app.get("/", include_in_schema=False)
-def index():
-    return FileResponse(STATIC_DIR / "index.html")
-
-
-if STATIC_DIR.exists():
-    app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")

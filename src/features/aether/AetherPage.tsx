@@ -81,7 +81,7 @@ export function AetherPage() {
         fails = h ? 0 : fails + 1;
         if (alive) setOffline(fails >= 3);
         if (h?.status === "error") {
-          if (alive) setBootError("Motor başlatılamadı (aether-fire günlüğüne bak).");
+          if (alive) setBootError("Motor başlatılamadı (`npm run api` terminalindeki günlüğe bak).");
           return;
         }
         if (h?.ready) {
@@ -94,7 +94,7 @@ export function AetherPage() {
         }
         await new Promise((res) => setTimeout(res, 1500));
       }
-      if (alive) setBootError("Backend'e ulaşılamadı. `python run.py` ile aether-fire sunucusunu başlat (port 8000).");
+      if (alive) setBootError("Backend'e ulaşılamadı. `npm run api` ile Python sunucusunu başlat (port 8000).");
     })();
     return () => { alive = false; };
   }, []);

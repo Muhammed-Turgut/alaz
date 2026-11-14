@@ -10,7 +10,7 @@ Steps
   1. generate the 2001-2026 benchmark archives if their cache is missing (~5 s)
   2. train the biome-stratified quantile harmonizer if the saved model is missing,
      unreadable or from another version (~30 s), otherwise verify it by scoring a sample
-  3. start uvicorn serving the API and the Mission Control UI
+  3. start uvicorn serving the API (the UI is the React app in the repo root: `npm run dev`)
 """
 from __future__ import annotations
 
@@ -99,7 +99,7 @@ def main() -> None:
     port = args.port or int(os.environ.get("PORT", "8000"))
     key = "configured" if os.environ.get("FIRMS_MAP_KEY") else "not set (open FIRMS feeds + cache fallback)"
     print(f"[aether] FIRMS_MAP_KEY: {key}")
-    print(f"[aether] Mission Control -> http://{host}:{port}/   (API docs: /docs)")
+    print(f"[aether] API -> http://{host}:{port}/api   (docs: /docs)   UI: npm run dev")
 
     import uvicorn
 

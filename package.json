@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "api": "cd aether-fire && .venv/bin/python run.py",
+    "api": "cd backend && .venv/bin/python run.py",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "typecheck": "tsc -b --noEmit"

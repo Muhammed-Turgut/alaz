@@ -272,7 +272,7 @@ export interface HeatmapGeom { left: number; top: number; cw: number; cellH: num
 /** 25 yıl x 365 gün takvim ısı haritası. Fare üstü için geometriyi döndürür. */
 export function drawCalendar(canvas: HTMLCanvasElement, cal: CalendarPayload, cssW: number): HeatmapGeom {
   const v = viz();
-  const ramp = makeRamp(v.ramp);
+  const ramp = makeRamp(v.calRamp);
   const years = cal.years;
   const nd = cal.doy.length;
   const left = 46, top = 22, right = 8, bottom = 6, cellH = 16;

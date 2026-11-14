@@ -54,6 +54,11 @@
   --viz-ramp-2: #0b60b0;
   --viz-ramp-3: #073c6e;
   --viz-ramp-4: #000000;
+  --viz-cal-0: #fed976;                     /* yanma takvimi rampası: sarı -> turuncu -> kırmızı (az -> çok) */
+  --viz-cal-1: #feb24c;
+  --viz-cal-2: #fd8d3c;
+  --viz-cal-3: #f03b20;
+  --viz-cal-4: #bd0026;
   --viz-sat-terra: var(--palette-black);
   --viz-sat-aqua: var(--palette-blue);
   --viz-sat-snpp: var(--palette-sky);
@@ -65,6 +70,7 @@
   --viz-conf-unknown: #cfcfcf;
   --viz-cluster-small: #e2e2e2;              /* kümeler nötr gri; en büyük küme ters renk */
   --viz-cluster-medium: #b5b5b5;
+  --viz-space: var(--palette-black);         /* globe arkasındaki uzay: her iki temada siyah */
   --viz-atmos-low: var(--palette-sky);       /* globe atmosferi */
   --viz-atmos-high: var(--palette-blue);
 
@@ -135,6 +141,11 @@
   --viz-ramp-2: #8fd0f0;
   --viz-ramp-3: #cfeaf8;
   --viz-ramp-4: #fff9f2;
+  --viz-cal-0: #fff3a3;                     /* koyu zeminde de sarı = az, kırmızı = çok */
+  --viz-cal-1: #ffc84a;
+  --viz-cal-2: #ff9130;
+  --viz-cal-3: #f4511e;
+  --viz-cal-4: #d81b1b;
   --viz-atmos-low: #0b3d6b;                 /* globe atmosferi */
   --viz-atmos-high: #0b60b0;
   --viz-sat-terra: var(--palette-white);

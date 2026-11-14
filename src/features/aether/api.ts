@@ -1,7 +1,7 @@
 import type {
-  AreaCalendarResult, ArchiveStatus, BreakPayload, BriefingResult, CalendarPayload, GeometryPayload,
-  Health, HarmonizedDetection, HexDetail, HexPayload, LatLng, ModelPayload, Region, RoiResult, Scope,
-  SeriesPayload, StaticSources, ValidationPayload,
+  AreaCalendarResult, ArchiveStatus, BreakPayload, BriefingAudience, BriefingResult, CalendarPayload,
+  GeometryPayload, Health, HarmonizedDetection, HexDetail, HexPayload, LatLng, ModelPayload, Region,
+  RoiResult, Scope, SeriesPayload, StaticSources, ValidationPayload,
 } from "./types";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -65,6 +65,8 @@ export const api = {
     bbox?: [number, number, number, number]; // west,south,east,north
     series: "harmonized" | "raw";
     target_year?: number;
+    start_year?: number;
+    end_year?: number;
     month?: number;
   }) =>
     post<AreaCalendarResult>("/api/area-calendar", {
@@ -72,6 +74,8 @@ export const api = {
       bbox: opts.bbox ?? null,
       series: opts.series,
       target_year: opts.target_year ?? null,
+      start_year: opts.start_year ?? null,
+      end_year: opts.end_year ?? null,
       month: opts.month ?? null,
     }),
   areaSeries: (opts: {
@@ -92,7 +96,34 @@ export const api = {
   hex: (cell: string, s: Scope) =>
     request<HexDetail>(`/api/hex/${cell}?source=live&days=${s.days}`),
   roi: (s: Scope) => post<RoiResult>("/api/roi", { ...scopeBody(s), polygon: s.roi }),
-  briefing: (s: Scope) => post<BriefingResult>("/api/briefing", { ...scopeBody(s), polygon: s.roi }),
+  briefing: (s: Scope, audience: BriefingAudience = "acil") =>
+    post<BriefingResult>("/api/briefing", { ...scopeBody(s), polygon: s.roi, audience }),
+  exportHotspotsCsv: async (opts: {
+    source: "live" | "archive";
+    polygon: LatLng[];
+    days?: number;
+  }) => {
+    const res = await fetch("/api/export-hotspots", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        source: opts.source,
+        polygon: opts.polygon,
+        days: opts.days ?? 1,
+      }),
+    });
+    if (!res.ok) {
+      let detail = res.statusText;
+      try {
+        const j = (await res.json()) as { detail?: unknown };
+        detail = typeof j.detail === "string" ? j.detail : JSON.stringify(j.detail);
+      } catch { /* ignore */ }
+      throw new Error(`${res.status}: ${detail}`);
+    }
+    const text = await res.text();
+    const n = Number(res.headers.get("X-Alaz-Rows") || "0");
+    return { text, n, truncated: res.headers.get("X-Alaz-Truncated") === "1" };
+  },
   interpret: (opts: {
     polygon: LatLng[];
     focus: "break" | "calendar" | "model" | "briefing";

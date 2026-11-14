@@ -70,10 +70,10 @@ def chat_interpret(
     headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
 
     try:
-        with httpx.Client(timeout=60.0) as client:
+        with httpx.Client(timeout=120.0) as client:
             res = client.post(url, headers=headers, json=payload)
     except httpx.TimeoutException as exc:
-        raise RuntimeError("DeepSeek zaman aşımı (60 sn). Tekrar dene.") from exc
+        raise RuntimeError("DeepSeek zaman aşımı (120 sn). Daha küçük ROI veya tekrar dene.") from exc
     except httpx.HTTPError as exc:
         raise RuntimeError(f"DeepSeek ağ hatası: {exc}") from exc
 

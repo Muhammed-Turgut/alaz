@@ -59,6 +59,12 @@
   --viz-cal-2: #fd8d3c;
   --viz-cal-3: #f03b20;
   --viz-cal-4: #bd0026;
+  /* Renk körü dostu takvim (mavi → turkuaz → sarı; kırmızı-yeşil bağımsız) */
+  --viz-cal-cb-0: #0d4a6f;
+  --viz-cal-cb-1: #1a7a9c;
+  --viz-cal-cb-2: #3db8a8;
+  --viz-cal-cb-3: #c4d96c;
+  --viz-cal-cb-4: #f0e68c;
   --viz-sat-terra: var(--palette-black);
   --viz-sat-aqua: var(--palette-blue);
   --viz-sat-snpp: var(--palette-sky);
@@ -150,6 +156,11 @@
   --viz-cal-2: #ff9130;
   --viz-cal-3: #f4511e;
   --viz-cal-4: #d81b1b;
+  --viz-cal-cb-0: #08304a;
+  --viz-cal-cb-1: #1a6b8a;
+  --viz-cal-cb-2: #2fbfa8;
+  --viz-cal-cb-3: #d4e06a;
+  --viz-cal-cb-4: #fff3a3;
   --viz-atmos-low: #0b3d6b;                 /* globe atmosferi */
   --viz-atmos-high: #0b60b0;
   --viz-sat-terra: var(--palette-white);

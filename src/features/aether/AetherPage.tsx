@@ -11,6 +11,7 @@ import { useLiveFires } from "./live/useLiveFires";
 import type { MapView } from "./mapView";
 import { ModelTab } from "./ModelTab";
 import { Sidebar } from "./Sidebar";
+import { useDataSource } from "./sourceContext";
 import type { ArchiveStatus, BBox, LatLng, Scope, Sensor, Source } from "./types";
 import { cx } from "./ui";
 import styles from "./aether.module.css";
@@ -31,15 +32,19 @@ const TABS: { id: Tab; label: string }[] = [
 type Target = { kind: "hex"; id: string } | { kind: "roi" } | null;
 
 export function AetherPage() {
+  const dataSource = useDataSource();
+  const source = dataSource?.source ?? "archive";
+
   const [ready, setReady] = useState(false);
   const [bootError, setBootError] = useState("");
   const [offline, setOffline] = useState(false);
 
-  const [source, setSource] = useState<Source>("archive");
   const days = 1;
+  const prevSource = useRef<Source>(source);
   const [sensor, setSensor] = useState<Sensor>("all");
   const [roi, setRoi] = useState<LatLng[] | null>(null);
   const [drawing, setDrawing] = useState(false);
+  const [csvBusy, setCsvBusy] = useState(false);
 
   const [basemapOk, setBasemapOk] = useState(true);
   const [fit, setFit] = useState<FitCommand | null>(null);
@@ -162,13 +167,18 @@ export function AetherPage() {
     return () => window.removeEventListener("keydown", h);
   }, [clearRoi]);
 
-  const changeSource = (s: Source) => {
-    clearRoi();
+  // Üst bar kaynak değişince ROI / seçimi temizle
+  useEffect(() => {
+    if (prevSource.current === source) return;
+    prevSource.current = source;
+    mapRef.current?.clearRoi();
+    setRoi(null);
+    setDrawing(false);
     setTarget(null);
     setInspector({ kind: "empty" });
     fitNext.current = true;
-    setSource(s);
-  };
+  }, [source]);
+
   const goTab = useCallback((t: Tab) => {
     setTab(t);
     setVisited((v) => new Set(v).add(t));
@@ -182,6 +192,36 @@ export function AetherPage() {
     goTab("briefing");
     setBriefTick((n) => n + 1);
   };
+
+  const exportHotspotsCsv = useCallback(async () => {
+    if (!roi || roi.length < 3) return;
+    if (source !== "live" && source !== "archive") return;
+    setCsvBusy(true);
+    try {
+      const { text, n, truncated } = await api.exportHotspotsCsv({
+        source,
+        polygon: roi,
+        days,
+      });
+      const url = URL.createObjectURL(new Blob([text], { type: "text/csv;charset=utf-8" }));
+      const a = Object.assign(document.createElement("a"), {
+        href: url,
+        download: `alaz-hotspots-${source}-${n}.csv`,
+      });
+      a.click();
+      URL.revokeObjectURL(url);
+      if (truncated) {
+        setInspector({
+          kind: "info",
+          message: `CSV ilk ${n.toLocaleString("tr-TR")} satırla sınırlandı.`,
+        });
+      }
+    } catch (e) {
+      setInspector({ kind: "error", message: (e as Error).message });
+    } finally {
+      setCsvBusy(false);
+    }
+  }, [roi, source, days]);
 
   const isLive = source === "live";
   const isArchive = source === "archive";
@@ -199,7 +239,7 @@ export function AetherPage() {
     if (archive.partial) return { kind: "info", text: `Gerçek FIRMS arşivi iniyor (${archive.done_chunks}/${archive.total_chunks}). Poligon çizerek kısmi geçmişi analiz edebilirsin.` };
     // Yönlendirme yalnızca harita sekmesinde; diğer sekmelerin kendi boş durumları var.
     if (!roi && tab === "map") {
-      return { kind: "info", text: "Türkiye kutusu içinde poligon çiz (≤ ~50.000 km²), ardından takvim / kırılma / brifing sekmelerine geç." };
+      return { kind: "info", text: "Türkiye kutusu içinde poligon çiz (≤ ~120.000 km²) veya enlem/boylam gir; ardından takvim / kırılma / brifing." };
     }
     if (!basemapOk) return { kind: "info", text: "Harita altlığı döşemelerine ulaşılamıyor (çevrimdışı). Altıgen katmanlar yine de çizilir." };
     return null;
@@ -226,8 +266,8 @@ export function AetherPage() {
     : roi
       ? `${roi.length} köşeli alan seçili.${isArchive ? " Analiz sekmeleri bu poligonu kullanır." : ""}`
       : isArchive
-        ? "Türkiye kutusu içinde poligon çiz (≤ ~50.000 km²)."
-        : "Köşe eklemek için haritaya tıkla, kapatmak için çift tıkla.";
+        ? "Türkiye kutusu içinde poligon çiz (≤ ~120.000 km²) veya enlem/boylam/yarıçap gir."
+        : "Köşe eklemek için haritaya tıkla, kapatmak için çift tıkla. Enlem/boylam da uygulanır.";
 
   if (!ready) {
     return (
@@ -248,17 +288,30 @@ export function AetherPage() {
       <Sidebar
         source={source}
         roiHint={roiHint} drawing={drawing} live={live} archive={archive}
-        onSource={changeSource}
+        roi={roi}
+        csvBusy={csvBusy}
         onDraw={startDraw}
         onFinish={() => { mapRef.current?.finishRoi(); }}
         onClearRoi={clearRoi}
         onBriefing={requestBriefing}
+        onRoiBox={(pts) => {
+          goTab("map");
+          setRoi(pts);
+          setDrawing(false);
+          setTarget({ kind: "roi" });
+          // Harita bir sonraki boyamada hazır olsun
+          queueMicrotask(() => mapRef.current?.setRoiPolygon(pts, { fit: true }));
+        }}
+        onExportCsv={() => void exportHotspotsCsv()}
       />
       <div className={styles.main}>
         <div className={styles.statusRow}>
+          <span className={cx(styles.pill, styles.pillOk)}>
+            {isLive ? "Kapsam: canlı global (24 sa)" : "Pilot: Türkiye arşivi"}
+          </span>
           <span className={styles.pill}>
             {isLive
-              ? `canlı harita · ${live.totalCount.toLocaleString("tr-TR")} FIRMS noktası (son 24 sa)`
+              ? `canlı harita · ${live.totalCount.toLocaleString("tr-TR")} FIRMS noktası`
               : `arşiv TR · ${archive?.done_chunks ?? "?"}/${archive?.total_chunks ?? "?"} dilim`}
           </span>
           <span className={cx(styles.pill, dataPill.tone === "ok" ? styles.pillOk : styles.pillWarn)}>{dataPill.text}</span>

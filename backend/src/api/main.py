@@ -20,7 +20,8 @@ from fastapi.responses import JSONResponse, PlainTextResponse
 
 from src.api.schemas import (
     AreaCalendarRequest, AreaScopeRequest, AreaSeriesRequest,
-    BriefingRequest, HarmonizeRequest, HealthResponse, InterpretRequest, ROIRequest,
+    BriefingRequest, ExportHotspotsRequest, HarmonizeRequest, HealthResponse,
+    InterpretRequest, ROIRequest,
 )
 from src.data.fires_feed import FiresFeed
 from src.data.regions import REGIONS
@@ -294,7 +295,8 @@ def area_calendar(req: AreaCalendarRequest):
     return _area_call(
         lambda: _st().area_calendar(
             polygon=req.polygon, bbox=req.bbox, series=req.series,
-            target_year=req.target_year, month=req.month, force=req.force,
+            target_year=req.target_year, start_year=req.start_year,
+            end_year=req.end_year, month=req.month, force=req.force,
         ),
         req,
     )
@@ -324,12 +326,35 @@ def briefing(req: BriefingRequest):
     _span(start, end)
     rid = _region(req.region) if req.source == "benchmark" else None
     try:
-        return _st().briefing(req.source, rid, start, end, req.polygon, req.days,
-                              _bbox(",".join(map(str, req.bbox))) if req.bbox else None)
+        return _st().briefing(
+            req.source, rid, start, end, req.polygon, req.days,
+            _bbox(",".join(map(str, req.bbox))) if req.bbox else None,
+            audience=req.audience or "acil",
+        )
     except FileNotFoundError as exc:
         raise HTTPException(503, str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
+
+
+@app.post("/api/export-hotspots")
+def export_hotspots(req: ExportHotspotsRequest):
+    """ROI içindeki sıcak noktaları CSV indir (challenge opsiyonel çıktı)."""
+    try:
+        text, info = _st().export_hotspots_csv(
+            source=req.source, polygon=req.polygon, days=req.days,
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(503, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    fname = f"alaz-hotspots-{req.source}-{info.get('n', 0)}.csv"
+    headers = {
+        "Content-Disposition": f'attachment; filename="{fname}"',
+        "X-Alaz-Rows": str(info.get("n", 0)),
+        "X-Alaz-Truncated": "1" if info.get("truncated") else "0",
+    }
+    return PlainTextResponse(text, media_type="text/csv; charset=utf-8", headers=headers)
 
 
 @app.post("/api/interpret")

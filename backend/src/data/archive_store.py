@@ -33,7 +33,8 @@ _SAT_MAP = {
 _VIIRS_CONF = {"l": 30, "low": 30, "n": 65, "nominal": 65, "h": 90, "high": 90}
 
 # Seçilebilir alan üst sınırı (yaklaşık km²). Kota alan-bağımsız; sınır performans + UX için.
-MAX_AREA_KM2 = 50_000.0
+# ~3°×3° civarı; daha büyük ROI için AI/brifing özet yolu kullanılır.
+MAX_AREA_KM2 = 120_000.0
 
 
 def _area_json(root: Path) -> dict:
@@ -214,7 +215,7 @@ class ArchiveStore:
         if km2 > MAX_AREA_KM2:
             raise ValueError(
                 f"Alan çok büyük ({km2:,.0f} km²). Üst sınır {MAX_AREA_KM2:,.0f} km² "
-                f"(yaklaşık 2°×2°)."
+                f"(daha küçük poligon veya yarıçap kullan)."
             )
         if east <= west or north <= south:
             raise ValueError("Geçersiz sınır kutusu.")

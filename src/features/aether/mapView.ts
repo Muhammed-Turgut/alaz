@@ -497,9 +497,29 @@ export class MapView {
     this.renderRoi();
   }
 
-  setRoiPolygon(pts: LatLng[]) {
+  setRoiPolygon(pts: LatLng[], opts?: { fit?: boolean }) {
     this.roi = pts;
     this.renderRoi();
+    if (opts?.fit && pts.length >= 3) {
+      const lats = pts.map((p) => p[0]);
+      const lons = pts.map((p) => p[1]);
+      const south = Math.min(...lats);
+      const north = Math.max(...lats);
+      const west = Math.min(...lons);
+      const east = Math.max(...lons);
+      const pad = 0.15;
+      try {
+        this.map.fitBounds(
+          [
+            [west - pad, south - pad],
+            [east + pad, north + pad],
+          ],
+          { padding: 48, maxZoom: 9, duration: 600 },
+        );
+      } catch {
+        this.fitBBox([south, west, north, east]);
+      }
+    }
   }
 
   private renderRoi() {

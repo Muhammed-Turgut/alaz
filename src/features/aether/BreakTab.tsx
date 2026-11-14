@@ -124,7 +124,7 @@ export function BreakTab({ source, roi, onDraw }: Props) {
       )}
       {needRoi && (
         <EmptyRoi
-          message="Kırılma analizi için haritada bir poligon çiz (≤ ~50.000 km²)."
+          message="Kırılma analizi için haritada bir poligon çiz (≤ ~120.000 km²)."
           onDraw={onDraw}
         />
       )}

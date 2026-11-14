@@ -5,6 +5,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: var(--space-4);
   height: var(--header-height);
   padding-inline: var(--space-6);
   background: var(--color-header-bg);
@@ -15,6 +16,7 @@
   display: flex;
   align-items: center;
   height: 100%;
+  flex-shrink: 0;
 }
 
 .logo {
@@ -22,11 +24,54 @@
   width: auto;
 }
 
+.sourceSwitch {
+  display: flex;
+  gap: 2px;
+  margin-right: var(--space-2);
+}
+
+.sourceBtn {
+  padding: 8px var(--space-4);
+  font-family: var(--font-display);
+  font-size: var(--text-base);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--palette-cream);
+  background: transparent;
+  border: 2px solid color-mix(in srgb, var(--palette-cream) 35%, transparent);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.sourceBtn:hover {
+  border-color: var(--palette-cream);
+  background: color-mix(in srgb, var(--palette-cream) 12%, transparent);
+}
+
+.sourceOn,
+.sourceOn:hover {
+  color: var(--palette-black);
+  background: var(--palette-cream);
+  border-color: var(--palette-cream);
+  font-weight: 700;
+}
+
 .actions {
   position: relative;
   display: flex;
   align-items: center;
   gap: 2px;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+@media (max-width: 720px) {
+  .sourceBtn {
+    font-size: 11px;
+    padding: 7px 6px;
+    letter-spacing: 0.02em;
+  }
 }
 
 .btn {

@@ -212,6 +212,8 @@ export interface AreaCalendarResult {
     raw_count?: number;
     detections?: number;
     date_range?: [string | null, string | null];
+    view_years?: [number, number];
+    target_year?: number;
     state?: string;
     done_chunks?: number;
     total_chunks?: number;
@@ -302,6 +304,8 @@ export interface BriefingResult {
 export interface Health {
   status: string; ready: boolean; model: string | null; detections: number; regions: string[];
 }
+
+export type BriefingAudience = "acil" | "erken_uyari" | "arazi" | "bilim" | "itfaiye";
 
 export interface Scope {
   source: Source;

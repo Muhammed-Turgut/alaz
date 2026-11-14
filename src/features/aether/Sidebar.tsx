@@ -1,10 +1,14 @@
+import { useEffect, useRef, useState } from "react";
+
 import { Button } from "@/components/ui/Button";
 import { APP_CONFIG, type ConfidenceKey } from "./live/config";
 import type { LiveFires } from "./live/useLiveFires";
-import type { ArchiveStatus, Source } from "./types";
-import { Seg } from "./ui";
+import type { ArchiveStatus, LatLng, Source } from "./types";
 import { viz } from "./viz";
 import styles from "./aether.module.css";
+
+/** Arşiv üst sınırı ile uyumlu (km²) — archive_store.MAX_AREA_KM2 */
+const MAX_ROI_KM2 = 120_000;
 
 interface Props {
   source: Source;
@@ -12,11 +16,45 @@ interface Props {
   drawing: boolean;
   live: LiveFires;
   archive: ArchiveStatus | null;
-  onSource: (s: Source) => void;
+  roi: LatLng[] | null;
+  csvBusy?: boolean;
   onDraw: () => void;
   onFinish: () => void;
   onClearRoi: () => void;
   onBriefing: () => void;
+  onRoiBox: (pts: LatLng[]) => void;
+  onExportCsv: () => void;
+}
+
+/** Merkez + yarıçap (km) → kapalı dikdörtgen poligon [[lat,lon],...] */
+export function boxFromCenter(lat: number, lon: number, radiusKm: number): LatLng[] {
+  const dLat = radiusKm / 111.32;
+  const cos = Math.cos((lat * Math.PI) / 180);
+  const dLon = radiusKm / (111.32 * Math.max(0.2, Math.abs(cos)));
+  return [
+    [lat - dLat, lon - dLon],
+    [lat - dLat, lon + dLon],
+    [lat + dLat, lon + dLon],
+    [lat + dLat, lon - dLon],
+    [lat - dLat, lon - dLon],
+  ];
+}
+
+export function approxBoxKm2(lat: number, _lon: number, radiusKm: number): number {
+  const dLat = radiusKm / 111.32;
+  const cos = Math.cos((lat * Math.PI) / 180);
+  const dLon = radiusKm / (111.32 * Math.max(0.2, Math.abs(cos)));
+  const dy = 2 * dLat * 111.32;
+  const dx = 2 * dLon * 111.32 * Math.max(0.05, Math.abs(cos));
+  return Math.abs(dx * dy);
+}
+
+/** En fazla ~√(MAX) / 2 kenar — TR enleminde güvenli yarıçap */
+export function maxRadiusKm(lat: number): number {
+  const cos = Math.max(0.2, Math.abs(Math.cos((lat * Math.PI) / 180)));
+  // kaba: alan ≈ (2r)² → r ≈ √(MAX)/2
+  const r = Math.sqrt(MAX_ROI_KM2) / 2;
+  return Math.floor(Math.min(180, r * Math.sqrt(cos)));
 }
 
 export function Sidebar(p: Props) {
@@ -26,22 +64,82 @@ export function Sidebar(p: Props) {
   const newest = metas.map((x) => x.newest).filter(Boolean).sort().at(-1);
   const oldest = metas.map((x) => x.oldest).filter(Boolean).sort()[0];
   const keyOn = metas.some((x) => x.keyConfigured);
+  const canCsv = Boolean(p.roi && p.roi.length >= 3);
+
+  const [lat, setLat] = useState("39.0");
+  const [lon, setLon] = useState("35.2");
+  const [radius, setRadius] = useState("25");
+  const [roiErr, setRoiErr] = useState("");
+  const [roiOk, setRoiOk] = useState("");
+  const [touched, setTouched] = useState(false);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastApplied = useRef("");
+
+  const applyLatLon = (opts?: { silent?: boolean }) => {
+    const la = Number(lat);
+    const lo = Number(lon);
+    const r = Number(radius);
+    if (!Number.isFinite(la) || la < -90 || la > 90) {
+      setRoiErr("Geçerli enlem gir (−90…90).");
+      setRoiOk("");
+      return false;
+    }
+    if (!Number.isFinite(lo) || lo < -180 || lo > 180) {
+      setRoiErr("Geçerli boylam gir (−180…180).");
+      setRoiOk("");
+      return false;
+    }
+    if (!Number.isFinite(r) || r < 1) {
+      setRoiErr("Yarıçap en az 1 km olmalı.");
+      setRoiOk("");
+      return false;
+    }
+    const cap = maxRadiusKm(la);
+    const useR = Math.min(r, cap);
+    const km2 = approxBoxKm2(la, lo, useR);
+    if (km2 > MAX_ROI_KM2) {
+      setRoiErr(`Alan ~${Math.round(km2).toLocaleString("tr-TR")} km² — üst sınır ${MAX_ROI_KM2.toLocaleString("tr-TR")} km². Yarıçapı ≤ ${cap} km yap.`);
+      setRoiOk("");
+      return false;
+    }
+    const key = `${la.toFixed(4)},${lo.toFixed(4)},${useR}`;
+    if (key === lastApplied.current && opts?.silent) return true;
+    lastApplied.current = key;
+    setRoiErr("");
+    if (useR < r) {
+      setRadius(String(useR));
+      setRoiOk(`Yarıçap ${useR} km’ye indirildi (alan sınırı). ROI haritada güncellendi.`);
+    } else {
+      setRoiOk(`ROI uygulandı (~${Math.round(km2).toLocaleString("tr-TR")} km²).`);
+    }
+    p.onRoiBox(boxFromCenter(la, lo, useR));
+    return true;
+  };
+
+  // Kullanıcı alanları değiştirdikten sonra otomatik uygula
+  useEffect(() => {
+    if (!touched) return;
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => {
+      applyLatLon({ silent: true });
+    }, 450);
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lat, lon, radius, touched]);
+
   return (
     <aside className={styles.sidebar}>
       <section className={styles.ctl}>
         <h4>Veri kaynağı</h4>
-        <Seg
-          value={p.source}
-          onChange={p.onSource}
-          options={[
-            { v: "live", label: "Canlı NASA FIRMS" },
-            { v: "archive", label: "Gerçek arşiv (TR)" },
-          ]}
-        />
         <p className={styles.hint}>
+          Kaynağı üst sağdan seç. <b>Tarihsel yanma takvimi:</b> Türkiye pilot arşivi.
+          {" "}
+          <b>Canlı harita:</b> dünya geneli son 24 saat FIRMS.
           {p.source === "archive"
-            ? "Türkiye kapsamasındaki gerçek NASA FIRMS MODIS+VIIRS geçmişi. Haritada alan çiz → Yanma takvimi."
-            : "NASA FIRMS yakın-gerçek-zamanlı (son 24 saat) MODIS + VIIRS tespitleri. Çevrimdışıyken önbellek / paketli gerçek örneğe düşer; sentetik veri gösterilmez."}
+            ? " Şu an arşiv — ROI ile takvim / kırılma / brifing."
+            : " Şu an canlı — global noktalar."}
         </p>
       </section>
 
@@ -68,11 +166,11 @@ export function Sidebar(p: Props) {
           <h4>Gerçek arşiv</h4>
           <div className={styles.metaBox}>
             {p.archive?.available
-              ? `${p.archive.name ?? "Türkiye"}\n${p.archive.partial ? "indiriliyor" : "hazır"} · ${p.archive.done_chunks}/${p.archive.total_chunks} dilim\nmaks. alan ≈ ${(p.archive.max_area_km2 ?? 50000).toLocaleString("tr-TR")} km²`
+              ? `${p.archive.name ?? "Türkiye"}\n${p.archive.partial ? "indiriliyor" : "hazır"} · ${p.archive.done_chunks}/${p.archive.total_chunks} dilim\nmaks. alan ≈ ${(p.archive.max_area_km2 ?? MAX_ROI_KM2).toLocaleString("tr-TR")} km²`
               : "Arşiv henüz yok veya yüklenemedi."}
           </div>
           <p className={styles.hint}>
-            Haritada poligon çiz. Takvim, kırılma, brifing ve model bu alan üzerinden hesaplanır.
+            Haritada poligon çiz veya aşağıda enlem/boylam/yarıçap gir — değer değişince ROI otomatik uygulanır.
           </p>
         </section>
       )}
@@ -85,11 +183,61 @@ export function Sidebar(p: Props) {
         </div>
         {p.drawing && <Button variant="secondary" className={styles.full} onClick={p.onFinish}>Poligonu bitir (veya çift tıkla)</Button>}
         <p className={styles.hint}>{p.roiHint}</p>
+        <div className={styles.latLonBox}>
+          <label>
+            Enlem
+            <input
+              type="number"
+              step="0.01"
+              value={lat}
+              onChange={(e) => { setTouched(true); setLat(e.target.value); }}
+              onKeyDown={(e) => { if (e.key === "Enter") applyLatLon(); }}
+            />
+          </label>
+          <label>
+            Boylam
+            <input
+              type="number"
+              step="0.01"
+              value={lon}
+              onChange={(e) => { setTouched(true); setLon(e.target.value); }}
+              onKeyDown={(e) => { if (e.key === "Enter") applyLatLon(); }}
+            />
+          </label>
+          <label>
+            Yarıçap km
+            <input
+              type="number"
+              step="1"
+              min={1}
+              max={200}
+              value={radius}
+              onChange={(e) => { setTouched(true); setRadius(e.target.value); }}
+              onKeyDown={(e) => { if (e.key === "Enter") applyLatLon(); }}
+            />
+          </label>
+        </div>
+        <Button className={styles.full} onClick={() => applyLatLon()}>
+          ROI’yi uygula / haritaya git
+        </Button>
+        {roiErr && <p className={styles.errText}>{roiErr}</p>}
+        {roiOk && !roiErr && <p className={styles.hint}>{roiOk}</p>}
       </section>
 
       <section className={styles.ctl}>
         <h4>Rapor</h4>
-        <Button className={styles.full} onClick={p.onBriefing}>Komutan brifingi üret</Button>
+        <Button className={styles.full} onClick={p.onBriefing}>Brifing üret</Button>
+        <Button
+          variant="secondary"
+          className={styles.full}
+          disabled={!canCsv || p.csvBusy}
+          onClick={p.onExportCsv}
+        >
+          {p.csvBusy ? "CSV hazırlanıyor..." : "Hotspot CSV indir"}
+        </Button>
+        <p className={styles.hint}>
+          Brifing: acil müdahale, erken uyarı, arazi, bilim, itfaiye. CSV: ROI içi FIRMS noktaları.
+        </p>
       </section>
 
       <p className={styles.foot}>

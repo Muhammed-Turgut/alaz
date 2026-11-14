@@ -57,8 +57,37 @@ def _is_local_val(val: dict) -> bool:
     return bool(val) and "rmse_raw" in val and "holdout_2022_2026" not in val
 
 
+_AUDIENCE = {
+    "acil": {
+        "title": "ACİL MÜDAHALE BRİFİNGİ",
+        "who": "Acil müdahale / olay komutanı",
+        "focus": "operasyonel öncelik ve kaynak",
+    },
+    "erken_uyari": {
+        "title": "ERKEN UYARI BRİFİNGİ",
+        "who": "Erken uyarı / izleme",
+        "focus": "eşikler, z-skoru ve kritik pencereler",
+    },
+    "arazi": {
+        "title": "ARAZİ YÖNETİMİ BRİFİNGİ",
+        "who": "Arazi / yangın rejimi yönetimi",
+        "focus": "sezon, medyan ve çok yıllı karşılaştırma",
+    },
+    "bilim": {
+        "title": "BİLİMSEL ÖZET BRİFİNGİ",
+        "who": "Bilim / analitik",
+        "focus": "metrikler, harmonizasyon ve doğrulama",
+    },
+    "itfaiye": {
+        "title": "İTFAİYE SAHA BRİFİNGİ",
+        "who": "İtfaiye / saha ekipleri",
+        "focus": "kısa öncelik listesi ve konum",
+    },
+}
+
+
 def generate(ctx: dict) -> dict:
-    """ctx anahtarları: scope, window, totals, top_cells, climate, drivers, quality, validation, centre."""
+    """ctx: scope, window, totals, top_cells, climate, drivers, quality, validation, centre, audience."""
     totals = ctx.get("totals", {}) or {}
     clim = ctx.get("climate") or {}
     z = clim.get("recent_z")
@@ -73,6 +102,10 @@ def generate(ctx: dict) -> dict:
     q = ctx.get("quality") or {}
     val = ctx.get("validation") or {}
     historical = bool(q.get("historical"))
+    aud_key = (ctx.get("audience") or "acil").strip()
+    if aud_key not in _AUDIENCE:
+        aud_key = "acil"
+    aud = _AUDIENCE[aud_key]
 
     est, lo, hi = totals.get("harmonized"), totals.get("harmonized_lo90"), totals.get("harmonized_hi90")
     raw = totals.get("raw_total")
@@ -80,28 +113,74 @@ def generate(ctx: dict) -> dict:
     low_n = totals.get("lowconf_removed", 0)
 
     actions = []
-    if level in ("AŞIRI", "YÜKSEK", "EXTREME", "ELEVATED"):
-        actions.append("Personel / kaynakları öne al: etkinlik tarihsel zarfın üzerinde.")
-    if static_n:
+    if aud_key == "erken_uyari":
+        actions.append(f"Uyarı seviyesi **{level}** — {level_reason}.")
+        if z is not None:
+            actions.append(f"Son 7 gün iklimsel z = **{z:+.1f}**; |z|≥2 ise izleme yoğunlaştır.")
+        actions.append(
+            f"Tepe yayılım ~{peak['utc']} UTC (göreli {peak['relative_intensity']:.2f}); "
+            f"çukur ~{trough['utc']} UTC."
+        )
+    elif aud_key == "arazi":
+        actions.append(
+            f"Ham tespit **{_fmt(raw)}** · harmonize VIIRS-eşdeğeri **{_fmt(est, 1)}** — "
+            "sezon ve çok yıllı medyan ile karşılaştır."
+        )
+        if clim:
+            actions.append(f"İklimsel z (son 7 gün): **{clim.get('recent_z')}**.")
+        actions.append("Yanma takvimi sekmesinde ay×yıl ve bu ay vs medyan kartlarını incele.")
+    elif aud_key == "bilim":
+        actions.append(
+            f"Ham {_fmt(raw)} / harmonize {_fmt(est, 1)}; FRP ort. ham {_fmt(totals.get('frp_raw_mean'), 1)} MW → "
+            f"harmonize {_fmt(totals.get('frp_harm_mean'), 1)} MW."
+        )
+        if _is_local_val(val):
+            actions.append(
+                f"Yerel doğrulama RMSE ham→harmonize {_fmt(val.get('rmse_raw'), 1)} → {_fmt(val.get('rmse_harmonized'), 1)} "
+                f"(n={_fmt(val.get('n'))} ay)."
+            )
+        actions.append("Model ve doğrulama + yapısal kırılma sekmelerinde sensör geçişini kontrol et.")
+    elif aud_key == "itfaiye":
+        if top:
+            actions.append(
+                f"**Öncelik 1:** hex `{top[0]['h3']}` (~{top[0]['harmonized']:.1f} VIIRS-eşd. nokta, "
+                f"FRP ~{top[0]['frp_harm_mean']:.1f} MW)."
+            )
+        if len(top) > 1:
+            actions.append(
+                f"**Öncelik 2–3:** " + ", ".join(f"`{c['h3']}`" for c in top[1:3]) + "."
+            )
+        actions.append(
+            f"Yoğunluk tepe ~{peak['utc']} UTC; hat için çukur ~{trough['utc']} UTC."
+        )
+        if level in ("AŞIRI", "YÜKSEK"):
+            actions.append("Seviye yüksek — takviye ve su ikmali için erken plan yap.")
+    else:  # acil
+        if level in ("AŞIRI", "YÜKSEK", "EXTREME", "ELEVATED"):
+            actions.append("Personel / kaynakları öne al: etkinlik tarihsel zarfın üzerinde.")
+        if top:
+            actions.append(
+                f"İlk bakış görüntüsü için hex `{top[0]['h3']}` (~{top[0]['harmonized']:.1f} VIIRS-ölçekli sıcak nokta) önceliklendir."
+            )
+        actions.append(
+            f"Yoğunluk çukuru (~{trough['utc']} UTC, göreli {trough['relative_intensity']:.2f}) için hat planla; "
+            f"tepe yayılım ~{peak['utc']} UTC (göreli {peak['relative_intensity']:.2f}) beklenir."
+        )
+
+    if static_n and aud_key in ("acil", "itfaiye", "erken_uyari"):
         actions.append(
             f"**{static_n:,}** kalıcı kaynak tespitine (flare / tesis / volkan) müdahale etme — zaten dışlandı."
         )
-    if top:
-        actions.append(
-            f"İlk bakış görüntüsü için hex `{top[0]['h3']}` (~{top[0]['harmonized']:.1f} VIIRS-ölçekli sıcak nokta) önceliklendir."
-        )
-    actions.append(
-        f"Yoğunluk çukuru (~{trough['utc']} UTC, göreli {trough['relative_intensity']:.2f}) için hat planla; "
-        f"tepe yayılım ~{peak['utc']} UTC (göreli {peak['relative_intensity']:.2f}) beklenir."
-    )
     if q.get("non_live") and not historical:
         actions.append("Rakamlar **canlı değil**: FIRMS bağlantısı düzelince yenile.")
-    if historical:
+    if historical and aud_key in ("acil", "itfaiye", "erken_uyari"):
         actions.append("Bu brifing **tarihsel arşiv** özetidir; anlık operasyon için Canlı NASA FIRMS modunu kullan.")
 
     md = []
-    md.append("# TAKTİK OLAY KOMUTANI BRİFİNGİ — AETHER-FIRE / Alaz")
+    md.append(f"# {aud['title']} — AETHER-FIRE / Alaz")
     md.append(
+        f"**Hedef kitle:** {aud['who']}  \n"
+        f"**Vurgu:** {aud['focus']}  \n"
         f"**Kapsam:** {ctx.get('scope', 'yok')}  \n"
         f"**Pencere:** {ctx.get('window', 'yok')}  \n"
         f"**Üretim:** {dt.datetime.now(dt.timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}  \n"
@@ -217,6 +296,7 @@ def generate(ctx: dict) -> dict:
 
     payload = {
         "alert": {"level": level, "reason": level_reason},
+        "audience": aud_key,
         "scope": ctx.get("scope"), "window": ctx.get("window"), "totals": totals,
         "priority_cells": top[:8], "diurnal_outlook": outlook, "overpass_schedule": sched,
         "drivers": drivers, "climate": clim, "recommended_actions": actions, "quality": q,

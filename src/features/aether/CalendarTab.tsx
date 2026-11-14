@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { api } from "./api";
 import { calendarHoverText, drawCalendar, envelopeChart, type HeatmapGeom } from "./charts";
@@ -18,18 +18,38 @@ interface Props {
   onDraw?: () => void;
 }
 
+function yearsBetween(a: number, b: number): number[] {
+  const lo = Math.min(a, b);
+  const hi = Math.max(a, b);
+  const out: number[] = [];
+  for (let y = lo; y <= hi; y++) out.push(y);
+  return out;
+}
+
 export function CalendarTab({ visible, source, roi, onDraw }: Props) {
-  const [series, setSeries] = useState<"harmonized" | "raw">("raw");
+  const [series, setSeries] = useState<"harmonized" | "raw">("harmonized");
   const [cal, setCal] = useState<CalendarPayload | null>(null);
   const [area, setArea] = useState<AreaCalendarResult | null>(null);
   const [error, setError] = useState("");
   const [hover, setHover] = useState(HOVER_IDLE);
   const [width, setWidth] = useState(0);
   const [busy, setBusy] = useState(false);
+  const [startYear, setStartYear] = useState<number | null>(null);
+  const [endYear, setEndYear] = useState<number | null>(null);
+  const [targetYear, setTargetYear] = useState<number | null>(null);
+  const [dataYears, setDataYears] = useState<[number, number] | null>(null);
   const wrap = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
   const geom = useRef<HeatmapGeom | null>(null);
-  const { theme } = usePrefs();
+  const { theme, calRamp } = usePrefs();
+
+  // ROI değişince yıl seçimini sıfırla (yeni alanın tarih aralığı gelsin)
+  useEffect(() => {
+    setStartYear(null);
+    setEndYear(null);
+    setTargetYear(null);
+    setDataYears(null);
+  }, [roi]);
 
   useEffect(() => {
     let live = true;
@@ -39,8 +59,8 @@ export function CalendarTab({ visible, source, roi, onDraw }: Props) {
 
     if (source === "live") {
       setError(
-        "Canlı FIRMS yalnızca son ~24 saat — yanma takvimi (yıl×gün) yok. "
-        + "Gerçek arşiv (TR) + poligon kullan. Haritadaki canlı noktalar yine gerçek FIRMS’tir.",
+        "Canlı FIRMS yalnızca son ~24 saat (küresel) — yanma takvimi yok. "
+        + "Gerçek arşiv (TR) + ROI kullan. Tarihsel takvim Türkiye pilot kapsamasındadır.",
       );
       return () => { live = false; };
     }
@@ -50,17 +70,37 @@ export function CalendarTab({ visible, source, roi, onDraw }: Props) {
       return () => { live = false; };
     }
     setBusy(true);
-    api.areaCalendar({ polygon: roi, series })
+    api.areaCalendar({
+      polygon: roi,
+      series,
+      start_year: startYear ?? undefined,
+      end_year: endYear ?? undefined,
+      target_year: targetYear ?? undefined,
+    })
       .then((r) => {
         if (!live) return;
         setArea(r);
-        if (r.empty) setError(r.message || "Seçilen alanda tespit yok.");
-        else if (r.calendar) setCal(r.calendar);
+        if (r.empty) {
+          setError(r.message || "Seçilen alanda tespit yok.");
+          return;
+        }
+        if (r.calendar) setCal(r.calendar);
+        const dr = r.meta?.date_range;
+        if (dr?.[0] && dr?.[1]) {
+          const sy = Number(dr[0].slice(0, 4));
+          const ey = Number(dr[1].slice(0, 4));
+          if (Number.isFinite(sy) && Number.isFinite(ey)) {
+            setDataYears([sy, ey]);
+            if (startYear == null) setStartYear(r.meta?.view_years?.[0] ?? sy);
+            if (endYear == null) setEndYear(r.meta?.view_years?.[1] ?? ey);
+            if (targetYear == null) setTargetYear(r.meta?.target_year ?? ey);
+          }
+        }
       })
       .catch((e: Error) => live && setError(e.message))
       .finally(() => live && setBusy(false));
     return () => { live = false; };
-  }, [series, source, roi]);
+  }, [series, source, roi, startYear, endYear, targetYear]);
 
   // wrap yalnızca cal geldikten sonra DOM’da; görünür olunca yeniden ölç.
   useEffect(() => {
@@ -80,7 +120,7 @@ export function CalendarTab({ visible, source, roi, onDraw }: Props) {
   useEffect(() => {
     if (!cal || !canvas.current || width < 100 || !visible) return;
     geom.current = drawCalendar(canvas.current, cal, width);
-  }, [cal, width, visible, theme]);
+  }, [cal, width, visible, theme, calRamp]);
 
   const draw = useCallback((c: HTMLCanvasElement) => envelopeChart(c, cal!), [cal]);
 
@@ -89,6 +129,11 @@ export function CalendarTab({ visible, source, roi, onDraw }: Props) {
     const r = e.currentTarget.getBoundingClientRect();
     setHover(calendarHoverText(cal, geom.current, e.clientX - r.left, e.clientY - r.top));
   };
+
+  const yearOpts = useMemo(() => {
+    if (!dataYears) return [];
+    return yearsBetween(dataYears[0], dataYears[1]);
+  }, [dataYears]);
 
   const vs = area?.current_month_vs_median;
   const my = area?.month_year;
@@ -100,28 +145,81 @@ export function CalendarTab({ visible, source, roi, onDraw }: Props) {
       <div className={styles.panelHead}>
         <h2>Gerçek FIRMS yanma takvimi</h2>
         <div className={styles.inlineCtl}>
-          <Seg value={series} onChange={setSeries} options={[{ v: "raw", label: "Ham" }, { v: "harmonized", label: "Harmonize" }]} />
+          <Seg
+            value={series}
+            onChange={setSeries}
+            options={[
+              { v: "harmonized", label: "VIIRS-eşdeğer" },
+              { v: "raw", label: "Ham (sensör ayrı)" },
+            ]}
+          />
         </div>
       </div>
 
       {needRoi && (
         <EmptyRoi
-          message="Takvim için haritada bir poligon çiz (≤ ~50.000 km², Türkiye kutusu içinde)."
+          message="Takvim için ROI çiz veya enlem/boylam gir (Türkiye pilot arşivi, ≤ ~120.000 km²)."
           onDraw={onDraw}
         />
+      )}
+
+      {source === "archive" && yearOpts.length > 0 && (
+        <div className={styles.yearRow}>
+          <label>
+            Başlangıç yılı
+            <select
+              value={startYear ?? yearOpts[0]}
+              onChange={(e) => {
+                const y = Number(e.target.value);
+                setStartYear(y);
+                if (endYear != null && y > endYear) setEndYear(y);
+                if (targetYear != null && y > targetYear) setTargetYear(y);
+              }}
+            >
+              {yearOpts.map((y) => <option key={y} value={y}>{y}</option>)}
+            </select>
+          </label>
+          <label>
+            Bitiş yılı
+            <select
+              value={endYear ?? yearOpts[yearOpts.length - 1]}
+              onChange={(e) => {
+                const y = Number(e.target.value);
+                setEndYear(y);
+                if (startYear != null && y < startYear) setStartYear(y);
+                if (targetYear != null && y < targetYear) setTargetYear(y);
+              }}
+            >
+              {yearOpts.map((y) => <option key={y} value={y}>{y}</option>)}
+            </select>
+          </label>
+          <label>
+            Hedef yıl (anomali / medyan)
+            <select
+              value={targetYear ?? endYear ?? yearOpts[yearOpts.length - 1]}
+              onChange={(e) => setTargetYear(Number(e.target.value))}
+            >
+              {yearsBetween(startYear ?? yearOpts[0], endYear ?? yearOpts[yearOpts.length - 1]).map((y) => (
+                <option key={y} value={y}>{y}</option>
+              ))}
+            </select>
+          </label>
+        </div>
       )}
 
       {source === "archive" && meta && (
         <Hint>
           {meta.partial ? `Arşiv iniyor: ${meta.done_chunks}/${meta.total_chunks} dilim. ` : "Arşiv hazır. "}
           Alan ~{meta.area_km2?.toLocaleString("tr-TR")} km² · ham tespit {meta.raw_count?.toLocaleString("tr-TR")}
-          {meta.date_range?.[0] ? ` · ${meta.date_range[0]} → ${meta.date_range[1]}` : ""}
+          {meta.date_range?.[0] ? ` · veri ${meta.date_range[0]} → ${meta.date_range[1]}` : ""}
+          {meta.view_years ? ` · görünüm ${meta.view_years[0]}–${meta.view_years[1]}` : ""}
           {meta.counts ? ` · MODIS ${meta.counts.raw_modis.toLocaleString("tr-TR")} / VIIRS ${meta.counts.raw_viirs.toLocaleString("tr-TR")}` : ""}
         </Hint>
       )}
       {source === "archive" && meta && (
         <Hint>
-          Hücre değerleri bu poligonun gerçek FIRMS tespit sayısıdır. Harmonize isteğe bağlıdır — doğruluk için <b>Ham</b> seriyi kullan.
+          Birincil seri <b>VIIRS-eşdeğer (harmonize)</b> — sensör farkı giderilmiş zaman serisi.
+          Ham, MODIS/VIIRS’i ayrı tutar (karşılaştırma).
         </Hint>
       )}
 
@@ -221,7 +319,7 @@ export function CalendarTab({ visible, source, roi, onDraw }: Props) {
           </Hint>
           {(area.local_validation.rmse_reduction_pct ?? 0) < 0 && (
             <div className={styles.banner}>
-              Harmonize model bu alanda VIIRS&apos;e yaklaştırmıyor. Ham takvim güvenilir; harmonize şimdilik karşılaştırma için.
+              Harmonize model bu alanda VIIRS&apos;e yaklaştırmıyor. Ham takvim karşılaştırma için; birincil öneri yine VIIRS-eşdeğer etiketli seridir.
             </div>
           )}
           <AiInsight focus="calendar" section="validation" label="Yerel doğrulama" roi={roi} compact />

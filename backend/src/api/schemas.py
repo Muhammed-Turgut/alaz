@@ -46,6 +46,9 @@ class HarmonizeRequest(BaseModel):
     detections: list[DetectionIn] = Field(..., min_length=1, max_length=2000)
 
 
+Audience = Literal["acil", "erken_uyari", "arazi", "bilim", "itfaiye"]
+
+
 class BriefingRequest(BaseModel):
     source: Source = "benchmark"
     region: Optional[str] = "california"
@@ -54,6 +57,24 @@ class BriefingRequest(BaseModel):
     polygon: Optional[list[list[float]]] = None
     days: int = Field(1, ge=1, le=7)
     bbox: Optional[list[float]] = None
+    audience: Audience = "acil"
+
+
+class ExportHotspotsRequest(BaseModel):
+    """ROI içindeki FIRMS sıcak noktalarını CSV olarak indir."""
+    source: Literal["live", "archive"] = "archive"
+    polygon: list[list[float]] = Field(..., description="[[lat, lon], ...] (>= 3)")
+    days: int = Field(1, ge=1, le=7, description="Canlı kaynak için gün sayısı")
+
+    @field_validator("polygon")
+    @classmethod
+    def _poly(cls, v):
+        if len(v) < 3:
+            raise ValueError("polygon needs at least 3 vertices")
+        for p in v:
+            if len(p) != 2 or not (-90 <= p[0] <= 90) or not (-180 <= p[1] <= 180):
+                raise ValueError("vertices must be [lat, lon] within valid ranges")
+        return v
 
 
 class AreaScopeRequest(BaseModel):
@@ -94,6 +115,8 @@ class AreaScopeRequest(BaseModel):
 class AreaCalendarRequest(AreaScopeRequest):
     series: Literal["harmonized", "raw"] = "harmonized"
     target_year: Optional[int] = Field(None, ge=2000, le=2100)
+    start_year: Optional[int] = Field(None, ge=2000, le=2100)
+    end_year: Optional[int] = Field(None, ge=2000, le=2100)
     month: Optional[int] = Field(None, ge=1, le=12)
 
 

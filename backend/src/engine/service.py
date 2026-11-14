@@ -444,7 +444,7 @@ class AetherState:
             if polygon is None and store_bbox is None:
                 raise ValueError(
                     "Gerçek arşiv brifingi için haritada bir poligon çiz "
-                    f"(üst sınır ~{int(self.archive.status().get('max_area_km2', 50000)):,} km², Türkiye kutusu içinde)."
+                    f"(üst sınır ~{int(self.archive.status().get('max_area_km2', 120000)):,} km², Türkiye kutusu içinde)."
                 )
             raw, meta = self.archive.query(bbox=store_bbox, polygon=polygon)
             if raw.empty:
@@ -606,7 +606,7 @@ class AetherState:
         return round((float(np.log1p(cur)) - med) / scale, 2)
 
     def briefing(self, source: str = "benchmark", region: str | None = "california", start=None, end=None,
-                 polygon=None, days: int = 1, bbox=None) -> dict:
+                 polygon=None, days: int = 1, bbox=None, audience: str = "acil") -> dict:
         from src.analytics.briefing_generator import generate
         if source == "benchmark":
             region = region or "california"
@@ -674,8 +674,78 @@ class AetherState:
             window = f"{start} → {end}"
         ctx = {"scope": scope, "window": window, "totals": totals, "top_cells": top, "climate": climate,
                "drivers": self._explain_summary(sub), "quality": quality, "validation": val,
-               "centre": [float(sub["latitude"].mean()), float(sub["longitude"].mean())]}
+               "centre": [float(sub["latitude"].mean()), float(sub["longitude"].mean())],
+               "audience": audience or "acil"}
         return clean(generate(ctx))
+
+    def export_hotspots_csv(self, *, source: str, polygon: list[list[float]], days: int = 1) -> tuple[str, dict]:
+        """ROI içindeki ham FIRMS sıcak noktalarını CSV metni + meta olarak döner."""
+        import io
+
+        if not polygon or len(polygon) < 3:
+            raise ValueError("polygon gerekli (≥ 3 köşe)")
+        if source == "archive":
+            df, _, meta = self._load_area(polygon=polygon)
+            if df.empty:
+                return "latitude,longitude,acq_date,acq_time,satellite,instrument,frp,brightness,confidence\n", {
+                    "n": 0, "source": "archive", "truncated": False, "meta": meta,
+                }
+        elif source == "live":
+            df, meta = self.get_live(days=days)
+            if df.empty:
+                return "latitude,longitude,acq_date,acq_time,satellite,instrument,frp,brightness,confidence\n", {
+                    "n": 0, "source": "live", "truncated": False, "meta": meta,
+                }
+            cells = geo.cells_in_polygon(polygon, geo.RES_REGIONAL)
+            if "h3_7" in df.columns:
+                df = df[df["h3_7"].isin(cells)]
+            else:
+                # fallback: bbox clip
+                lats = [p[0] for p in polygon]
+                lons = [p[1] for p in polygon]
+                df = df[
+                    (df["latitude"] >= min(lats)) & (df["latitude"] <= max(lats))
+                    & (df["longitude"] >= min(lons)) & (df["longitude"] <= max(lons))
+                ]
+        else:
+            raise ValueError("source live veya archive olmalı")
+
+        limit = 50_000
+        truncated = len(df) > limit
+        if truncated:
+            df = df.head(limit)
+
+        bright_col = "bright_t21" if "bright_t21" in df.columns else ("brightness" if "brightness" in df.columns else None)
+        rows = {
+            "latitude": df["latitude"].to_numpy() if "latitude" in df.columns else [],
+            "longitude": df["longitude"].to_numpy() if "longitude" in df.columns else [],
+        }
+        if "ts" in df.columns:
+            ts = pd.to_datetime(df["ts"], errors="coerce")
+            rows["acq_date"] = ts.dt.strftime("%Y-%m-%d").to_numpy()
+            rows["acq_time"] = (ts.dt.hour * 100 + ts.dt.minute).fillna(0).astype(int).to_numpy()
+        else:
+            rows["acq_date"] = df["acq_date"].to_numpy() if "acq_date" in df.columns else [""] * len(df)
+            rows["acq_time"] = df["acq_time"].to_numpy() if "acq_time" in df.columns else [0] * len(df)
+        rows["satellite"] = df["satellite"].astype(str).to_numpy() if "satellite" in df.columns else [""] * len(df)
+        rows["instrument"] = df["instrument"].astype(str).to_numpy() if "instrument" in df.columns else [""] * len(df)
+        rows["frp"] = pd.to_numeric(df["frp"], errors="coerce").to_numpy() if "frp" in df.columns else [None] * len(df)
+        rows["brightness"] = (
+            pd.to_numeric(df[bright_col], errors="coerce").to_numpy() if bright_col else [None] * len(df)
+        )
+        rows["confidence"] = df["confidence"].to_numpy() if "confidence" in df.columns else [None] * len(df)
+
+        out = pd.DataFrame(rows)
+        buf = io.StringIO()
+        out.to_csv(buf, index=False)
+        info = {
+            "n": int(len(out)),
+            "source": source,
+            "truncated": truncated,
+            "limit": limit,
+            "area_km2": (meta or {}).get("area_km2") if source == "archive" else None,
+        }
+        return buf.getvalue(), info
 
     # ------------------------------------------------------------------
     # gerçek FIRMS arşivi (Türkiye kapsama) — seçilen alan (tüm sekmeler)
@@ -735,7 +805,7 @@ class AetherState:
             **meta,
             "model": self.model.version,
             "model_note": "Sayılar bu ROI’nin gerçek NASA FIRMS arşivinden. "
-                          "Harmonize opsiyoneldir; Ham seri birincil kaynaktır.",
+                          "Birincil analiz serisi VIIRS-eşdeğer harmonize; ham karşılaştırma içindir.",
             "detections": int(len(df)),
             "raw_count": int(len(df)),
             "date_range": [start, end],
@@ -806,6 +876,8 @@ class AetherState:
         bbox: list[float] | None = None,
         series: str = "harmonized",
         target_year: int | None = None,
+        start_year: int | None = None,
+        end_year: int | None = None,
         month: int | None = None,
         force: bool = False,
     ) -> dict:
@@ -817,17 +889,32 @@ class AetherState:
                 "message": "Seçilen alanda arşivde tespit yok (indirme süüyor veya alan boş).",
             })
         start, end = meta["date_range"]
-        ty = int(target_year or pd.Timestamp(end).year)
-        sy = int(pd.Timestamp(start).year)
+        data_sy = int(pd.Timestamp(start).year)
+        data_ey = int(pd.Timestamp(end).year)
+        sy = int(start_year) if start_year is not None else data_sy
+        ey = int(end_year) if end_year is not None else data_ey
+        sy = max(data_sy, min(sy, data_ey))
+        ey = max(sy, min(ey, data_ey))
+        ty = int(target_year) if target_year is not None else ey
+        ty = max(sy, min(ty, ey))
         col = "harmonized" if series == "harmonized" else "raw_all"
-        cal = build_calendar(daily[col].astype(float), target_year=ty, start_year=sy)
+        series_daily = daily[col].astype(float)
+        # Görüntülenen aralık dışı yılları kes (takvim matrisi daralsın)
+        series_daily = series_daily[
+            (series_daily.index.year >= sy) & (series_daily.index.year <= ey)
+        ]
+        cal = build_calendar(series_daily, target_year=ty, start_year=sy)
         cal["region"] = "archive:tr"
         cal["series"] = series
         return clean({
             "empty": False,
-            "meta": meta,
+            "meta": {
+                **meta,
+                "view_years": [sy, ey],
+                "target_year": ty,
+            },
             "calendar": cal,
-            "month_year": month_year_matrix(daily[col].astype(float), start_year=sy, end_year=ty),
+            "month_year": month_year_matrix(series_daily, start_year=sy, end_year=ty),
             "current_month_vs_median": current_month_vs_median(
                 daily[col].astype(float), year=ty, month=month,
             ),
@@ -935,23 +1022,34 @@ class AetherState:
         if not polygon or len(polygon) < 3:
             return clean({"available": ds.configured(), "empty": True, "message": "Poligon gerekli (≥ 3 köşe)."})
 
-        need_break = focus in ("break", "model", "briefing") or sec in (
-            "overview", "chart", "stats", "verdict", "explain", "summary", "validation",
-        )
+        # Büyük ROI'de area_break + area_calendar birlikte çok ağır; briefing/overview
+        # için takvim + meta yeterli. Kırılma sekmesi bölümleri break ister.
+        need_break = focus == "break" or sec in (
+            "chart", "stats", "verdict", "explain", "summary", "validation",
+        ) or (focus == "model" and sec in ("summary", "validation", "overview"))
         need_cal = focus in ("calendar", "briefing") or sec in (
             "overview", "month_vs_median", "heatmap", "month_year", "envelope", "anomalies",
         )
+        # model overview: break meta yeter; takvim şart değil
+        if focus == "model" and sec in ("summary", "validation", "overview"):
+            need_cal = False
 
-        brk = self.area_break(polygon=polygon) if need_break else {"empty": True}
-        if need_break and brk.get("empty") and focus != "calendar":
+        try:
+            brk = self.area_break(polygon=polygon) if need_break else {"empty": True}
+        except ValueError as exc:
+            return clean({"available": ds.configured(), "empty": True, "message": str(exc)})
+        if need_break and brk.get("empty") and focus not in ("calendar", "briefing"):
             return clean({
                 "available": ds.configured(),
                 "empty": True,
                 "message": brk.get("message") or "Seçilen alanda tespit yok.",
             })
 
-        cal = self.area_calendar(polygon=polygon, series="raw") if need_cal else {"empty": True}
-        if focus == "calendar" and cal.get("empty"):
+        try:
+            cal = self.area_calendar(polygon=polygon, series="raw") if need_cal else {"empty": True}
+        except ValueError as exc:
+            return clean({"available": ds.configured(), "empty": True, "message": str(exc)})
+        if focus in ("calendar", "briefing") and cal.get("empty") and not need_break:
             return clean({
                 "available": ds.configured(),
                 "empty": True,

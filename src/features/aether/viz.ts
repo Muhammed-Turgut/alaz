@@ -37,6 +37,8 @@ export interface VizColors {
 }
 
 export function viz(): VizColors {
+  const calPrefix =
+    document.documentElement.dataset.calRamp === "colorblind" ? "--viz-cal-cb-" : "--viz-cal-";
   return {
     raw: cssVar("--viz-raw"),
     harmonized: cssVar("--viz-harmonized"),
@@ -61,7 +63,7 @@ export function viz(): VizColors {
       UNKNOWN: cssVar("--viz-conf-unknown"),
     },
     cluster: { small: cssVar("--viz-cluster-small"), medium: cssVar("--viz-cluster-medium") },
-    calRamp: [0, 1, 2, 3, 4].map((i) => cssVar(`--viz-cal-${i}`)),
+    calRamp: [0, 1, 2, 3, 4].map((i) => cssVar(`${calPrefix}${i}`)),
     ramp: [0, 1, 2, 3, 4].map((i) => cssVar(`--viz-ramp-${i}`)),
     sat: {
       Terra: cssVar("--viz-sat-terra"),

@@ -2,14 +2,17 @@ import { useSyncExternalStore } from "react";
 
 export type Theme = "light" | "dark";
 export type MapStyle = "auto" | "light" | "dark" | "satellite";
+export type CalRamp = "default" | "colorblind";
 
 export interface Prefs {
   theme: Theme;
   mapStyle: MapStyle;
+  calRamp: CalRamp;
 }
 
 const KEY = "alaz.prefs";
 const MAP_STYLES: MapStyle[] = ["auto", "light", "dark", "satellite"];
+const CAL_RAMPS: CalRamp[] = ["default", "colorblind"];
 
 function load(): Prefs {
   try {
@@ -17,9 +20,10 @@ function load(): Prefs {
     return {
       theme: raw.theme === "dark" ? "dark" : "light",
       mapStyle: MAP_STYLES.includes(raw.mapStyle as MapStyle) ? (raw.mapStyle as MapStyle) : "auto",
+      calRamp: CAL_RAMPS.includes(raw.calRamp as CalRamp) ? (raw.calRamp as CalRamp) : "default",
     };
   } catch {
-    return { theme: "light", mapStyle: "auto" };
+    return { theme: "light", mapStyle: "auto", calRamp: "default" };
   }
 }
 
@@ -28,6 +32,7 @@ const subs = new Set<() => void>();
 
 function apply() {
   document.documentElement.dataset.theme = prefs.theme;
+  document.documentElement.dataset.calRamp = prefs.calRamp;
 }
 apply(); // ilk boyamadan önce uygula (yanıp sönme olmasın)
 

@@ -1,26 +1,75 @@
 /*
  * Design tokens — projenin TEK renk/ölçü kaynağı.
- * Ren paleti geldiğinde sadece bu dosyadaki "Renkler" bölümünü güncellemek yeterli.
+ * Palet/renk değişikliği için sadece "Marka paleti" ve "Anlamsal renkler" bölümleri güncellenir.
  * Bileşenlerde asla doğrudan renk kodu yazma, her zaman var(--...) kullan.
  */
 :root {
-  /* ---------- Renkler (geçici beyaz tema) ---------- */
-  --color-bg: #ffffff;
-  --color-bg-subtle: #f8fafc;
-  --color-surface: #ffffff;
-  --color-border: #e5e7eb;
+  /* ---------- Marka paleti (Color Hunt: 000000 · 0B60B0 · 40A2D8 · F0EDCF) ---------- */
+  --palette-black: #000000;
+  --palette-blue: #0b60b0;
+  --palette-sky: #40a2d8;
+  --palette-cream: #f0edcf;
+  --palette-white: #fff9f2;            /* saf beyaz yerine kullanılacak sıcak beyaz */
 
-  --color-text: #111827;
-  --color-text-muted: #6b7280;
+  /* ---------- Anlamsal renkler ---------- */
+  --color-bg: var(--palette-white);
+  --color-bg-subtle: #f0f0f0;                /* soluk nötr gri: düz dolgu blokları, varsayılan düğme zemini */
+  --color-gray-text: #767676;                /* aynı grinin koyu tonu: seçili olmayan düğme / sekme yazısı */
+  --color-surface: var(--palette-white);
+  --color-border: #e7e2dc;             /* nötr sıcak gri çizgi (sarı değil) */
 
-  --color-primary: #111827;
-  --color-primary-hover: #1f2937;
-  --color-primary-contrast: #ffffff;
+  --color-text: var(--palette-black);
+  --color-text-muted: #55606b;
 
-  --color-accent: #2563eb;
-  --color-focus-ring: #93c5fd;
+  --color-primary: var(--palette-blue);
+  --color-primary-hover: #094d8d;
+  --color-primary-contrast: var(--palette-white);
+
+  --color-accent: var(--palette-sky);
+  --color-focus-ring: var(--palette-sky);
+
+  --color-header-bg: var(--palette-black);   /* logo siyah zeminli */
+  --color-header-text: var(--palette-cream);
+
+  /* Durum renkleri (işlevsel; marka paletinde karşılığı yok) */
+  --color-success: #1f9d55;
+  --color-success-bg: #eaf7ef;
+  --color-warning: #b7791f;
+  --color-warning-bg: var(--color-surface);
+  --color-danger: #d6322a;
+  --color-danger-bg: #fdecea;
+  --color-info: var(--palette-blue);
+  --color-info-bg: var(--color-surface);
+
+  /* ---------- AETHER-FIRE veri görselleştirme renkleri ---------- */
+  --viz-raw: var(--palette-black);          /* ham (harmonize edilmemiş) sayım */
+  --viz-harmonized: var(--palette-blue);    /* harmonize edilmiş sayım */
+  --viz-truth: var(--palette-sky);          /* gizli gerçek (counterfactual) */
+  --viz-fire: var(--color-danger);          /* çıkarılan / vurgu */
+  --viz-warn: var(--color-warning);
+  --viz-roi: var(--palette-blue);           /* çizilen ilgi alanı */
+  --viz-selected: var(--palette-black);
+  --viz-ramp-0: #cfe8f5;                    /* hex yoğunluk rampası: açık gök mavisi -> gök mavisi -> mavi -> siyah */
+  --viz-ramp-1: #40a2d8;
+  --viz-ramp-2: #0b60b0;
+  --viz-ramp-3: #073c6e;
+  --viz-ramp-4: #000000;
+  --viz-sat-terra: var(--palette-black);
+  --viz-sat-aqua: var(--palette-blue);
+  --viz-sat-snpp: var(--palette-sky);
+  --viz-sat-noaa20: #a8982f;
+  --viz-map-bg: #ececec;
+  --viz-conf-high: var(--palette-blue);      /* canlı nokta güveni: yüksek -> normal -> düşük -> bilinmiyor */
+  --viz-conf-nominal: var(--palette-sky);
+  --viz-conf-low: #9a9a9a;
+  --viz-conf-unknown: #cfcfcf;
+  --viz-cluster-small: #e2e2e2;              /* kümeler nötr gri; en büyük küme ters renk */
+  --viz-cluster-medium: #b5b5b5;
+  --viz-atmos-low: var(--palette-sky);       /* globe atmosferi */
+  --viz-atmos-high: var(--palette-blue);
 
   /* ---------- Tipografi ---------- */
+  --font-display: "New Amsterdam", "Arial Narrow", system-ui, sans-serif;   /* başlık / marka / etiket */
   --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 
@@ -40,13 +89,62 @@
   --space-12: 3rem;
   --space-16: 4rem;
 
-  --radius-sm: 6px;
-  --radius-md: 10px;
-  --radius-lg: 16px;
+  --radius-sm: 0;
+  --radius-md: 0;
+  --radius-lg: 0;
 
-  --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.06);
-  --shadow-md: 0 4px 16px rgb(0 0 0 / 0.08);
+  --shadow-sm: none;
+  --shadow-md: none;
 
   --container-width: 1120px;
   --header-height: 64px;
+}
+
+/* ---------- Koyu tema: yalnızca değişen anlamsal token'lar ---------- */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --color-bg: #0c0c0c;
+  --color-bg-subtle: #1b1b1b;
+  --color-surface: #131313;
+  --color-border: #2a2a2a;
+
+  --color-text: var(--palette-white);
+  --color-text-muted: #a8a8a8;
+  --color-gray-text: #8d8d8d;
+
+  --color-primary-hover: var(--palette-sky);
+  --color-primary-contrast: var(--palette-white);
+  --color-header-bg: var(--palette-black);
+
+  --color-success: #4cc582;
+  --color-success-bg: #10281a;
+  --color-warning: #e0a94a;
+  --color-danger: #ff6b61;
+  --color-danger-bg: #2e1513;
+  --color-info: var(--palette-sky);
+
+  --viz-raw: var(--palette-white);
+  --viz-harmonized: var(--palette-sky);
+  --viz-truth: #9fd3ee;
+  --viz-fire: var(--color-danger);
+  --viz-roi: var(--palette-sky);
+  --viz-selected: var(--palette-white);
+  --viz-ramp-0: #1e6fb8;                    /* koyu zeminde artan parlaklık */
+  --viz-ramp-1: #40a2d8;
+  --viz-ramp-2: #8fd0f0;
+  --viz-ramp-3: #cfeaf8;
+  --viz-ramp-4: #fff9f2;
+  --viz-atmos-low: #0b3d6b;                 /* globe atmosferi */
+  --viz-atmos-high: #0b60b0;
+  --viz-sat-terra: var(--palette-white);
+  --viz-sat-aqua: var(--palette-sky);
+  --viz-sat-snpp: #9fd3ee;
+  --viz-map-bg: #1b1b1b;
+  --viz-conf-high: var(--palette-white);
+  --viz-conf-nominal: var(--palette-sky);
+  --viz-conf-low: #5d6b76;
+  --viz-conf-unknown: #4a4a4a;
+  --viz-cluster-small: #3b3b3b;
+  --viz-cluster-medium: #6b6b6b;
 }

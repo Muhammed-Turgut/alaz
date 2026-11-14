@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AETHER-FIRE | MODIS-VIIRS Hot Spot Harmonization</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath fill='%23ff8a1f' d='M16 2c1 6 8 9 8 17a8 8 0 0 1-16 0c0-4 2-6 3-8 1 3 2 4 3 4 0-5-1-8 2-13z'/%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="/static/vendor/leaflet/leaflet.css" />
+  <link rel="stylesheet" href="/static/css/style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <svg viewBox="0 0 32 32" width="26" height="26" aria-hidden="true"><path fill="#ff8a1f" d="M16 2c1 6 8 9 8 17a8 8 0 0 1-16 0c0-4 2-6 3-8 1 3 2 4 3 4 0-5-1-8 2-13z"/><path fill="#ffd27a" d="M16 14c.5 3 4 4 4 8a4 4 0 0 1-8 0c0-2 1-3 1.5-4 .5 1.5 1 2 1.5 2 0-2-.5-3 1-6z"/></svg>
+      <div>
+        <div class="brand-name">AETHER-FIRE</div>
+        <div class="brand-sub">Thermal Harmonization &amp; Emission Reconstruction Engine</div>
+      </div>
+    </div>
+    <div class="pills">
+      <span class="pill" id="pill-engine">engine: loading</span>
+      <span class="pill" id="pill-model">model: -</span>
+      <span class="pill" id="pill-data">data: -</span>
+    </div>
+  </header>
+
+  <div class="shell">
+    <aside class="sidebar" id="sidebar">
+      <section class="ctl">
+        <h4>Data source</h4>
+        <div class="seg" id="seg-source">
+          <button data-v="benchmark" class="on">Benchmark 2001-2026</button>
+          <button data-v="live">Live FIRMS</button>
+        </div>
+        <p class="hint" id="source-hint">Physically simulated archive with a known ground truth. Not NASA observations.</p>
+      </section>
+
+      <section class="ctl" id="panel-bench">
+        <h4>Region &amp; window</h4>
+        <label>Region<select id="region"></select></label>
+        <label>Preset<select id="preset"></select></label>
+        <div class="row2">
+          <label>From<input type="date" id="start" min="2001-01-01" max="2026-11-14" /></label>
+          <label>To<input type="date" id="end" min="2001-01-01" max="2026-11-14" /></label>
+        </div>
+        <button class="btn" id="btn-apply">Apply window</button>
+      </section>
+
+      <section class="ctl hidden" id="panel-live">
+        <h4>Live window</h4>
+        <div class="seg" id="seg-days">
+          <button data-v="1" class="on">24 h</button>
+          <button data-v="7">7 days</button>
+        </div>
+        <button class="btn" id="btn-live-refresh">Refresh from FIRMS</button>
+        <div class="meta-box" id="live-meta">-</div>
+      </section>
+
+      <section class="ctl">
+        <h4>Map view</h4>
+        <div class="seg" id="seg-view">
+          <button data-v="raw">Raw</button>
+          <button data-v="harmonized">Harmonized</button>
+          <button data-v="split" class="on">Split</button>
+        </div>
+        <div class="seg" id="seg-metric">
+          <button data-v="count" class="on">Hotspot count</button>
+          <button data-v="frp">Mean FRP</button>
+        </div>
+      </section>
+
+      <section class="ctl">
+        <h4>Region of interest</h4>
+        <div class="row2">
+          <button class="btn" id="btn-roi-draw">Draw polygon</button>
+          <button class="btn ghost" id="btn-roi-clear">Clear</button>
+        </div>
+        <button class="btn ghost hidden" id="btn-roi-finish">Finish polygon (or double-click)</button>
+        <p class="hint" id="roi-hint">Click the map to add vertices, double-click to close.</p>
+      </section>
+
+      <section class="ctl">
+        <h4>Report</h4>
+        <button class="btn accent" id="btn-brief">Generate commander briefing</button>
+      </section>
+
+      <p class="foot">Raw counts include every platform's detections. Harmonized values are VIIRS-375 m equivalent hotspots per platform, with persistent industrial / volcanic sources removed.</p>
+    </aside>
+
+    <main class="main">
+      <nav class="tabs" id="tabs">
+        <button data-tab="map" class="on">Mission map</button>
+        <button data-tab="break">Structural break</button>
+        <button data-tab="calendar">Burning calendar</button>
+        <button data-tab="explain">Hotspot explainer</button>
+        <button data-tab="briefing">Briefing</button>
+        <button data-tab="model">Model &amp; validation</button>
+      </nav>
+
+      <div class="banner hidden" id="banner"></div>
+
+      <!-- MAP -->
+      <section class="tab on" id="tab-map">
+        <div class="kpis" id="kpis"></div>
+        <div class="map-row">
+          <div class="map-wrap" id="map-wrap">
+            <div class="map-box"><div class="map-label" id="label-a">RAW</div><div id="map-a"></div></div>
+            <div class="map-box" id="box-b"><div class="map-label harm">HARMONIZED</div><div id="map-b"></div></div>
+            <div class="legend" id="legend"></div>
+            <div class="map-loading hidden" id="map-loading">Loading hexagons...</div>
+          </div>
+          <aside class="detail" id="detail">
+            <div class="detail-empty">
+              <h3>Inspector</h3>
+              <p>Click a hexagon (H3 res-7, ~5.16 km2) for its raw-vs-harmonized breakdown, or draw a polygon to analyse a custom region of interest.</p>
+              <p class="hint">Dashed cyan outlines mark persistent thermal sources (industrial flares, plants, volcanoes) removed from the harmonized count.</p>
+            </div>
+          </aside>
+        </div>
+      </section>
+
+      <!-- STRUCTURAL BREAK -->
+      <section class="tab" id="tab-break">
+        <div class="panel-head">
+          <h2>Structural break at the 2012 sensor transition</h2>
+          <div class="inline-ctl">
+            <label>Scope<select id="break-region"></select></label>
+            <div class="seg" id="seg-freq"><button data-v="monthly" class="on">Monthly</button><button data-v="annual">Annual</button></div>
+          </div>
+        </div>
+        <div class="card chart-card"><canvas id="chart-break"></canvas></div>
+        <div class="grid2">
+          <div class="card"><h3>Test results</h3><div id="break-table"></div></div>
+          <div class="card"><h3>Reading</h3><div id="break-verdict"></div></div>
+        </div>
+        <div class="card"><h3>What this shows</h3>
+          <p class="prose">VIIRS (375 m) entered service on 2012-01-20. Counting its detections next to MODIS (1 km) produces an artificial jump in "burned area" unrelated to the fires themselves. The raw series breaks at the transition; the harmonized series (MODIS rescaled to VIIRS-equivalent hotspots before 2012, VIIRS counts afterwards) does not. The green line is the hidden counterfactual: what the SNPP record would have said before it existed.</p>
+        </div>
+      </section>
+
+      <!-- CALENDAR -->
+      <section class="tab" id="tab-calendar">
+        <div class="panel-head">
+          <h2>25-year burning calendar</h2>
+          <div class="inline-ctl">
+            <label>Region<select id="cal-region"></select></label>
+            <div class="seg" id="seg-calseries"><button data-v="harmonized" class="on">Harmonized</button><button data-v="raw">Raw</button></div>
+          </div>
+        </div>
+        <div class="card"><canvas id="cal-heat" height="470"></canvas><div class="hint" id="cal-hover">Hover a cell: year, day of year, activity.</div></div>
+        <div class="grid2">
+          <div class="card chart-card sm"><h3>Climatological envelope (P10 / P50 / P90) vs 2026</h3><canvas id="chart-env"></canvas></div>
+          <div class="card"><h3>2026 anomaly episodes</h3><div id="cal-episodes"></div></div>
+        </div>
+      </section>
+
+      <!-- EXPLAINER -->
+      <section class="tab" id="tab-explain">
+        <div class="panel-head"><h2>Hotspot explainer</h2></div>
+        <div class="grid2">
+          <div class="card">
+            <h3>Harmonize a detection</h3>
+            <form id="hz-form" class="form-grid">
+              <label>Latitude<input name="latitude" type="number" step="any" value="38.0" required /></label>
+              <label>Longitude<input name="longitude" type="number" step="any" value="-121.8" required /></label>
+              <label>Date (UTC)<input name="acq_date" type="date" value="2026-08-10" required /></label>
+              <label>Time (UTC, HHMM)<input name="acq_time" type="number" min="0" max="2359" value="2130" required /></label>
+              <label>Satellite<select name="satellite"><option>Aqua</option><option>Terra</option><option>SNPP</option><option>NOAA20</option></select></label>
+              <label>FRP (MW)<input name="frp" type="number" step="any" min="0" value="42" required /></label>
+              <label>Scan size (km)<input name="scan" type="number" step="any" min="0.1" value="3.5" /></label>
+              <label>Track size (km)<input name="track" type="number" step="any" min="0.1" value="1.8" /></label>
+              <label>Confidence (0-100)<input name="confidence" type="number" min="0" max="100" value="80" /></label>
+              <div class="form-actions"><button class="btn accent" type="submit">Harmonize</button></div>
+            </form>
+            <div id="hz-result" class="hz-result"></div>
+          </div>
+          <div class="card">
+            <h3>Bow-tie pixel footprint</h3>
+            <canvas id="chart-geom" height="260"></canvas>
+            <div class="hint" id="geom-note"></div>
+            <div id="geom-table"></div>
+          </div>
+        </div>
+        <div class="grid2">
+          <div class="card chart-card sm"><h3>Diurnal fire cycle (local solar time)</h3><canvas id="chart-diurnal"></canvas></div>
+          <div class="card chart-card sm"><h3>Overpass drift of Terra &amp; Aqua</h3><canvas id="chart-drift"></canvas></div>
+        </div>
+      </section>
+
+      <!-- BRIEFING -->
+      <section class="tab" id="tab-briefing">
+        <div class="panel-head">
+          <h2>Tactical incident commander briefing</h2>
+          <div class="inline-ctl">
+            <button class="btn accent" id="btn-brief2">Generate for current scope</button>
+            <button class="btn ghost" id="btn-brief-copy">Copy Markdown</button>
+            <button class="btn ghost" id="btn-brief-json">Download JSON</button>
+          </div>
+        </div>
+        <div class="card"><div id="brief-body" class="brief"><p class="hint">Generate a briefing for the current region, window, and ROI polygon (if drawn).</p></div></div>
+      </section>
+
+      <!-- MODEL -->
+      <section class="tab" id="tab-model">
+        <div class="panel-head"><h2>Model, validation &amp; data integrity</h2></div>
+        <div class="kpis" id="model-kpis"></div>
+        <div class="grid2">
+          <div class="card"><h3>Hold-out &amp; counterfactual validation</h3><div id="val-table"></div></div>
+          <div class="card chart-card sm"><h3>Permutation importance (FRP target)</h3><canvas id="chart-imp"></canvas></div>
+        </div>
+        <div class="grid2">
+          <div class="card"><h3>Persistent-source filter vs ground truth</h3><div id="static-table"></div></div>
+          <div class="card"><h3>Detected persistent sources</h3><div id="static-list" class="scroll"></div></div>
+        </div>
+        <div class="card"><h3>Method notes</h3><div id="method-notes" class="prose"></div></div>
+      </section>
+    </main>
+  </div>
+
+  <script src="/static/vendor/leaflet/leaflet.js"></script>
+  <script src="/static/vendor/chart.umd.js"></script>
+  <script type="module" src="/static/js/app.js"></script>
+</body>
+</html>

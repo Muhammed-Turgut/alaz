@@ -1,37 +1,102 @@
 .header {
   position: sticky;
   top: 0;
-  z-index: 10;
-  height: var(--header-height);
-  background: var(--color-bg);
-  border-bottom: 1px solid var(--color-border);
-}
-
-.inner {
+  z-index: 1000;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  height: 100%;
+  height: var(--header-height);
+  padding-inline: var(--space-6);
+  background: var(--color-header-bg);
+  border-bottom: 3px solid var(--color-primary);
 }
 
 .brand {
-  font-size: var(--text-lg);
-  font-weight: 700;
-  letter-spacing: -0.02em;
-}
-
-.nav {
   display: flex;
-  gap: var(--space-6);
+  align-items: center;
+  height: 100%;
 }
 
-.link {
-  font-size: var(--text-sm);
-  color: var(--color-text-muted);
-  transition: color 0.15s;
+.logo {
+  height: 44px;
+  width: auto;
 }
 
-.link:hover,
-.active {
+.actions {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.btn {
+  padding: 8px var(--space-4);
+  font-family: var(--font-display);
+  font-size: var(--text-base);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--palette-cream);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.btn:hover,
+.btnOn {
+  color: var(--palette-black);
+  background: var(--palette-cream);
+}
+
+.panel {
+  position: absolute;
+  top: calc(100% + 11px);
+  right: 0;
+  width: 280px;
+  padding: var(--space-4);
   color: var(--color-text);
+  background: var(--color-surface);
+  box-shadow: 0 4px 0 var(--color-primary);
+}
+
+.panelTitle {
+  margin-bottom: var(--space-2);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+.opts {
+  display: flex;
+  gap: 2px;
+}
+
+.opt {
+  flex: 1;
+  padding: 7px 4px;
+  font: inherit;
+  font-size: 12px;
+  white-space: nowrap;
+  color: var(--color-gray-text);
+  background: var(--color-bg-subtle);
+  border: 0;
+  cursor: pointer;
+}
+
+.opt:hover {
+  color: var(--color-text);
+}
+
+.optOn,
+.optOn:hover {
+  font-weight: 600;
+  color: var(--color-primary-contrast);
+  background: var(--color-primary);
+}
+
+.panelHint {
+  margin: var(--space-3) 0 0;
+  font-size: 12px;
+  color: var(--color-text-muted);
 }

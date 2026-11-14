@@ -9,4 +9,12 @@ export default defineConfig({
       "@": path.resolve(import.meta.dirname, "src"),
     },
   },
+  server: {
+    // Python backend (venv, veri, önbellek) izlenmesin: inotify limitini (ENOSPC) aşıp dev sunucuyu bozuyordu.
+    watch: { ignored: ["**/aether-fire/**"] },
+    // AETHER-FIRE Python backend (aether-fire/run.py) -> http://127.0.0.1:8000
+    proxy: {
+      "/api": { target: process.env.AETHER_API ?? "http://127.0.0.1:8000", changeOrigin: true },
+    },
+  },
 });

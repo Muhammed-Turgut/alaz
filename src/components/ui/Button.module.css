@@ -7,10 +7,10 @@
   font: inherit;
   font-size: var(--text-sm);
   font-weight: 600;
-  border: 1px solid transparent;
-  border-radius: var(--radius-md);
+  border: 0;
+  border-radius: 0;
   cursor: pointer;
-  transition: background 0.15s, border-color 0.15s;
+  transition: background 0.15s, color 0.15s;
 }
 
 .primary {
@@ -19,15 +19,15 @@
 }
 
 .primary:hover {
-  background: var(--color-primary-hover);
+  background: var(--color-text);
 }
 
 .secondary {
   background: var(--color-surface);
   color: var(--color-text);
-  border-color: var(--color-border);
 }
 
 .secondary:hover {
-  background: var(--color-bg-subtle);
+  background: var(--color-text);
+  color: var(--color-primary-contrast);
 }

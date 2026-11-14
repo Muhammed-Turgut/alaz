@@ -1,0 +1,37 @@
+.header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  height: var(--header-height);
+  background: var(--color-bg);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 100%;
+}
+
+.brand {
+  font-size: var(--text-lg);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.nav {
+  display: flex;
+  gap: var(--space-6);
+}
+
+.link {
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+  transition: color 0.15s;
+}
+
+.link:hover,
+.active {
+  color: var(--color-text);
+}

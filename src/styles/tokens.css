@@ -1,0 +1,52 @@
+/*
+ * Design tokens — projenin TEK renk/ölçü kaynağı.
+ * Ren paleti geldiğinde sadece bu dosyadaki "Renkler" bölümünü güncellemek yeterli.
+ * Bileşenlerde asla doğrudan renk kodu yazma, her zaman var(--...) kullan.
+ */
+:root {
+  /* ---------- Renkler (geçici beyaz tema) ---------- */
+  --color-bg: #ffffff;
+  --color-bg-subtle: #f8fafc;
+  --color-surface: #ffffff;
+  --color-border: #e5e7eb;
+
+  --color-text: #111827;
+  --color-text-muted: #6b7280;
+
+  --color-primary: #111827;
+  --color-primary-hover: #1f2937;
+  --color-primary-contrast: #ffffff;
+
+  --color-accent: #2563eb;
+  --color-focus-ring: #93c5fd;
+
+  /* ---------- Tipografi ---------- */
+  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  --text-sm: 0.875rem;
+  --text-base: 1rem;
+  --text-lg: 1.25rem;
+  --text-xl: 1.75rem;
+  --text-hero: clamp(2.25rem, 5vw, 3.75rem);
+
+  /* ---------- Boşluk / şekil ---------- */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+  --space-12: 3rem;
+  --space-16: 4rem;
+
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.06);
+  --shadow-md: 0 4px 16px rgb(0 0 0 / 0.08);
+
+  --container-width: 1120px;
+  --header-height: 64px;
+}

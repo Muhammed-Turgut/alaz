@@ -24,6 +24,8 @@ interface Props {
   onClearRoi: () => void;
   onBriefing: () => void;
   onRoiBox: (pts: LatLng[]) => void;
+  /** Haritada seçili poligona git (lat/lon varsayılanını dayatma). */
+  onFocusRoi?: (pts: LatLng[]) => void;
   onExportCsv: () => void;
 }
 
@@ -67,19 +69,40 @@ export function Sidebar(p: Props) {
   const keyOn = metas.some((x) => x.keyConfigured);
   const canCsv = Boolean(p.roi && p.roi.length >= 3);
 
-  const [lat, setLat] = useState("39.0");
-  const [lon, setLon] = useState("35.2");
+  // Empty defaults — do NOT pre-fill Ankara/central TR (was overwriting drawn polygons).
+  const [lat, setLat] = useState("");
+  const [lon, setLon] = useState("");
   const [radius, setRadius] = useState("25");
   const [roiErr, setRoiErr] = useState("");
   const [roiOk, setRoiOk] = useState("");
   const [touched, setTouched] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastApplied = useRef("");
+  const hasDrawnRoi = Boolean(p.roi && p.roi.length >= 3);
+
+  // Poligon çizildiyse enlem/boylam hatasını temizle — koordinat zorunlu değil
+  useEffect(() => {
+    if (!hasDrawnRoi) return;
+    setRoiErr("");
+    setRoiOk(`${p.roi!.length} köşeli poligon hazır — enlem/boylam gerekmez.`);
+  }, [hasDrawnRoi]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const applyLatLon = (opts?: { silent?: boolean }) => {
     const la = Number(lat);
     const lo = Number(lon);
     const r = Number(radius);
+    if (lat.trim() === "" || lon.trim() === "") {
+      if (!opts?.silent) {
+        if (hasDrawnRoi) {
+          setRoiErr("");
+          setRoiOk("Poligon zaten seçili. Enlem/boylam yalnızca alternatif yöntem.");
+        } else {
+          setRoiErr("Enlem/boylam boş. Haritada poligon çizmen yeterli — koordinat zorunlu değil.");
+          setRoiOk("");
+        }
+      }
+      return false;
+    }
     if (!Number.isFinite(la) || la < -90 || la > 90) {
       setRoiErr("Geçerli enlem gir (−90…90).");
       setRoiOk("");
@@ -117,9 +140,21 @@ export function Sidebar(p: Props) {
     return true;
   };
 
-  // Kullanıcı alanları değiştirdikten sonra otomatik uygula
+  const goToDrawnRoi = () => {
+    if (!p.roi || p.roi.length < 3) {
+      setRoiErr("Önce haritada poligon çiz (çift tıkla veya Bitir).");
+      setRoiOk("");
+      return;
+    }
+    setRoiErr("");
+    setRoiOk("Poligon kullanılıyor — haritada odaklanıldı.");
+    p.onFocusRoi?.(p.roi);
+  };
+
+  // Kullanıcı alanları değiştirdikten sonra otomatik uygula (yalnızca dokunulduysa)
   useEffect(() => {
     if (!touched) return;
+    if (lat.trim() === "" || lon.trim() === "") return;
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => {
       applyLatLon({ silent: true });
@@ -173,7 +208,7 @@ export function Sidebar(p: Props) {
                 : "Yerel arşiv yok; küresel ROI için FIRMS_MAP_KEY gerekli."}
           </div>
           <p className={styles.hint}>
-            Haritada <b>dünya geneli</b> poligon çiz veya enlem/boylam/yarıçap gir.
+            Haritada <b>dünya geneli</b> poligon çizmen yeterli (enlem/boylam şart değil).
             Türkiye yerel disk arşivi varsa o ROI hızlı yüklenir; dışı on-demand FIRMS API (MAP_KEY gerekir).
           </p>
         </section>
@@ -181,49 +216,70 @@ export function Sidebar(p: Props) {
 
       <section className={styles.ctl}>
         <h4>İlgi alanı (ROI)</h4>
+        <p className={styles.hint}>
+          Ana yol: haritada <b>poligon çiz</b> → bitince analiz sekmeleri onu kullanır.
+          Enlem/boylam yalnızca istersen alternatif.
+        </p>
         <div className={styles.row2}>
           <Button variant="secondary" onClick={p.onDraw}>Poligon çiz</Button>
           <Button variant="secondary" onClick={p.onClearRoi}>Temizle</Button>
         </div>
         {p.drawing && <Button variant="secondary" className={styles.full} onClick={p.onFinish}>Poligonu bitir (veya çift tıkla)</Button>}
         <p className={styles.hint}>{p.roiHint}</p>
-        <div className={styles.latLonBox}>
-          <label>
-            Enlem
-            <input
-              type="number"
-              step="0.01"
-              value={lat}
-              onChange={(e) => { setTouched(true); setLat(e.target.value); }}
-              onKeyDown={(e) => { if (e.key === "Enter") applyLatLon(); }}
-            />
-          </label>
-          <label>
-            Boylam
-            <input
-              type="number"
-              step="0.01"
-              value={lon}
-              onChange={(e) => { setTouched(true); setLon(e.target.value); }}
-              onKeyDown={(e) => { if (e.key === "Enter") applyLatLon(); }}
-            />
-          </label>
-          <label>
-            Yarıçap km
-            <input
-              type="number"
-              step="1"
-              min={1}
-              max={200}
-              value={radius}
-              onChange={(e) => { setTouched(true); setRadius(e.target.value); }}
-              onKeyDown={(e) => { if (e.key === "Enter") applyLatLon(); }}
-            />
-          </label>
-        </div>
-        <Button className={styles.full} onClick={() => applyLatLon()}>
-          ROI’yi uygula / haritaya git
-        </Button>
+        {hasDrawnRoi && (
+          <>
+            <Button className={styles.full} onClick={goToDrawnRoi}>
+              Poligon hazır — haritada göster
+            </Button>
+            <p className={styles.hint}>
+              Koordinat girmen gerekmez. Takvim / kırılma / brifing bu poligonu kullanır.
+            </p>
+          </>
+        )}
+        <details className={styles.roiAlt} open={!hasDrawnRoi}>
+          <summary>Alternatif: enlem / boylam / yarıçap</summary>
+          <div className={styles.latLonBox}>
+            <label>
+              Enlem
+              <input
+                type="number"
+                step="0.01"
+                value={lat}
+                onChange={(e) => { setTouched(true); setLat(e.target.value); }}
+                onKeyDown={(e) => { if (e.key === "Enter") applyLatLon(); }}
+              />
+            </label>
+            <label>
+              Boylam
+              <input
+                type="number"
+                step="0.01"
+                value={lon}
+                onChange={(e) => { setTouched(true); setLon(e.target.value); }}
+                onKeyDown={(e) => { if (e.key === "Enter") applyLatLon(); }}
+              />
+            </label>
+            <label>
+              Yarıçap km
+              <input
+                type="number"
+                step="1"
+                min={1}
+                max={200}
+                value={radius}
+                onChange={(e) => { setTouched(true); setRadius(e.target.value); }}
+                onKeyDown={(e) => { if (e.key === "Enter") applyLatLon(); }}
+              />
+            </label>
+          </div>
+          <Button
+            variant="secondary"
+            className={styles.full}
+            onClick={() => applyLatLon()}
+          >
+            Koordinat ile uygula
+          </Button>
+        </details>
         {roiErr && <p className={styles.errText}>{roiErr}</p>}
         {roiOk && !roiErr && <p className={styles.hint}>{roiOk}</p>}
       </section>

@@ -56,14 +56,51 @@
   gap: var(--space-3);
   margin: var(--space-3) 0;
 }
+.yearRow label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--color-text);
+}
+.yearRow select {
+  width: 100%;
+  padding: 8px 10px;
+  font: inherit;
+  color: var(--color-text);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+}
+.presetRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: var(--space-2);
+}
 @media (max-width: 720px) {
   .yearRow { grid-template-columns: 1fr; }
+}
+.roiAlt {
+  margin-top: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-bg-subtle);
+}
+.roiAlt summary {
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--color-text-muted);
+  user-select: none;
+}
+.roiAlt[open] summary {
+  margin-bottom: var(--space-2);
 }
 .latLonBox {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: var(--space-2);
-  margin-top: var(--space-3);
+  margin-top: var(--space-2);
 }
 .latLonBox label:last-child { grid-column: 1 / -1; }
 .full { width: 100%; margin-top: var(--space-2); }
@@ -325,6 +362,18 @@
   color: var(--color-primary-contrast);
   background: var(--color-primary);
   border-color: var(--color-primary);
+}
+.layerChk {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--color-gray-text);
+  white-space: nowrap;
+  user-select: none;
+}
+.layerChk input {
+  margin: 0;
 }
 .mapHint { margin: 0 0 var(--space-3); font-size: var(--text-sm); color: var(--color-text-muted); }
 .inspectBand {

@@ -1,7 +1,8 @@
 import type {
-  AreaCalendarResult, AreaDensityResult, ArchiveStatus, BreakPayload, BriefingAudience, BriefingResult,
-  CalendarPayload, GeometryPayload, Health, HarmonizedDetection, HexDetail, HexPayload, LatLng,
-  ModelPayload, Region, RoiResult, Scope, SeriesPayload, StaticSources, ValidationPayload,
+  AreaCalendarResult, AreaDensityResult, AreaHybridResult, ArchiveStatus, BreakPayload,
+  BriefingAudience, BriefingResult, CalendarPayload, GeometryPayload, Health, HarmonizedDetection,
+  HexDetail, HexPayload, LatLng, ModelPayload, Region, RoiResult, Scope, SeriesPayload,
+  StaticSources, ValidationPayload,
 } from "./types";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -63,7 +64,7 @@ export const api = {
   areaCalendar: (opts: {
     polygon?: LatLng[] | null;
     bbox?: [number, number, number, number]; // west,south,east,north
-    series: "harmonized" | "raw";
+    series: "harmonized" | "raw" | "hybrid";
     target_year?: number;
     start_year?: number;
     end_year?: number;
@@ -77,6 +78,24 @@ export const api = {
       start_year: opts.start_year ?? null,
       end_year: opts.end_year ?? null,
       month: opts.month ?? null,
+    }),
+  areaHybrid: (opts: {
+    polygon?: LatLng[] | null;
+    grid?: "h3" | "deg005";
+    fallback_alpha?: number;
+    map_years?: number;
+    map_recent_days?: number;
+    map_start?: string;
+    map_end?: string;
+  }) =>
+    post<AreaHybridResult>("/api/area-hybrid", {
+      polygon: opts.polygon ?? null,
+      grid: opts.grid ?? "h3",
+      fallback_alpha: opts.fallback_alpha ?? 2.5,
+      map_years: opts.map_years ?? null,
+      map_recent_days: opts.map_recent_days ?? null,
+      map_start: opts.map_start ?? null,
+      map_end: opts.map_end ?? null,
     }),
   areaSeries: (opts: {
     polygon?: LatLng[] | null;
@@ -134,12 +153,47 @@ export const api = {
     const n = Number(res.headers.get("X-Alaz-Rows") || "0");
     return { text, n, truncated: res.headers.get("X-Alaz-Truncated") === "1" };
   },
+  exportHybridCsv: async (opts: {
+    polygon: LatLng[];
+    grid?: "h3" | "deg005";
+    fallback_alpha?: number;
+  }) => {
+    const res = await fetch("/api/export-hybrid-csv", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        polygon: opts.polygon,
+        grid: opts.grid ?? "h3",
+        fallback_alpha: opts.fallback_alpha ?? 2.5,
+      }),
+    });
+    if (!res.ok) {
+      let detail = res.statusText;
+      try {
+        const j = (await res.json()) as { detail?: unknown };
+        detail = typeof j.detail === "string" ? j.detail : JSON.stringify(j.detail);
+      } catch { /* ignore */ }
+      throw new Error(`${res.status}: ${detail}`);
+    }
+    const text = await res.text();
+    const n = Number(res.headers.get("X-Alaz-Rows") || "0");
+    return {
+      text,
+      n,
+      alpha: res.headers.get("X-Alaz-Alpha"),
+      fallback: res.headers.get("X-Alaz-Fallback") === "1",
+    };
+  },
   interpret: (opts: {
     polygon: LatLng[];
     focus: "break" | "calendar" | "model" | "briefing";
     section?: string;
     question?: string;
     lang?: "tr" | "en";
+    series?: "harmonized" | "raw" | "hybrid";
+    start_year?: number;
+    end_year?: number;
+    target_year?: number;
   }) =>
     post<{
       available: boolean;
@@ -156,6 +210,10 @@ export const api = {
       section: opts.section || "overview",
       question: opts.question || null,
       lang: opts.lang || "tr",
+      series: opts.series || "raw",
+      start_year: opts.start_year ?? null,
+      end_year: opts.end_year ?? null,
+      target_year: opts.target_year ?? null,
     }),
   harmonize: (det: Record<string, unknown>) =>
     post<{ detections: HarmonizedDetection[]; model: string }>("/api/harmonize", { detections: [det] }),

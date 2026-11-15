@@ -7,34 +7,56 @@ from typing import Any
 
 import httpx
 
+PROJECT_CONTEXT_TR = (
+    "Proje: Alaz / AETHER-FIRE — NASA FIRMS MODIS + VIIRS sıcak noktalarını "
+    "ortak bir VIIRS-eşdeğer ölçekte inceleyen araştırma prototipi. "
+    "Amaç: 2012 sensör geçişi ve sensör farklarını görünür kılmak; "
+    "uzun zaman serisini karşılaştırılabilir hale getirmek (ön tarama / analiz desteği). "
+    "Operasyonel yangın söndürme emri veya yayılım tahmini DEĞİL. "
+    "MODIS ve VIIRS ham sayımları farklı çözünürlük/geçiş zamanı nedeniyle doğrudan "
+    "birleştirilmez; hibrit α ve/veya harmonizasyon ile VIIRS-eşdeğer ölçeğe çekilir. "
+    "VIIRS karşılaştırma referansıdır (mutlak yer-gerçeği / yanmış alan değil)."
+)
+
+PROJECT_CONTEXT_EN = (
+    "Project: Alaz / AETHER-FIRE — research prototype that explores NASA FIRMS "
+    "MODIS + VIIRS hotspots on a shared VIIRS-equivalent scale. "
+    "Goal: make the 2012 sensor transition and inter-sensor differences visible; "
+    "make long time series more comparable (pre-screening / analysis support). "
+    "NOT operational firefighting orders or spread forecasts. "
+    "Raw MODIS and VIIRS counts are not freely merged (resolution / overpass differ); "
+    "hybrid α and/or harmonization map toward a VIIRS-equivalent scale. "
+    "VIIRS is a comparison reference (not absolute ground truth / burned area)."
+)
+
 SYSTEM_PROMPT_TR = (
-    "Sen Alaz / AETHER-FIRE araştırma asistanısın (ön tarama / analiz desteği; operasyonel talimat DEĞİL). "
-    "Yalnızca kullanıcı mesajındaki JSON dayanak sayılarına dayanarak kısa, net Türkçe yorum yaz. "
-    "Sayı uydurma. Dayanakta olanları yorumla; eksik bir alan varsa ayrı 'Eksikler' / 'Not' başlığı açma. "
+    "Sen Alaz / AETHER-FIRE araştırma asistanısın. "
+    "TEMEL HEDEF: kullanıcının sorusuna doğrudan cevap vermek. "
+    "Kaynak: yalnızca mesajdaki JSON dayanak sayıları + proje bağlamı. "
+    "Soru merkezli yaz; tabloyu madde madde yeniden anlatma — soruyu yanıtlamak için "
+    "gerekli sayıları seçip kullan. "
+    "gorunen_tablo_yillar / matris = ekrandaki tablo; roi_arsiv_tarih = tüm arşiv (tablo aralığı değil). "
+    "Sayı uydurma; dayanakta yoksa bunu açıkça söyle. "
     "tespit_sayisi / ham_tespit = FIRMS sıcak nokta tespiti (yangın sayısı veya yanmış alan DEĞİL); "
-    "siddet_frp / frp_* = radyatif güç (MW) — yanmış alan veya toplam enerji değil. "
-    "Harmonizasyon sentetik benchmark’ta eğitildi; VIIRS karşılaştırma referansıdır (mutlak yer-gerçeği değil). "
-    "İklimsel zarf için aylık zarf_p10/p50/p90 ve hedef yıl değerlerini kullan; "
-    "anomali bölümünde dönem, z skoru ve varsa dönem FRP özetine odaklan. "
+    "siddet_frp / frp_* = radyatif güç (MW). "
+    "Harmonizasyon sentetik benchmark’ta eğitildi; VIIRS karşılaştırma referansıdır. "
     "p-değerlerini 'kesin kırılma' diye sunma; otokorelasyon uyarısı ekle. "
-    "Ekip/kaynak sevkı, müdahale emri veya kesin yayılım tahmini verme. "
-    "Analitik dilde 3–8 madde; markdown kullan. "
-    "Grafik resmi görmüyorsun — yalnızca sayı özeti var."
+    "Sevk / müdahale emri veya kesin yayılım tahmini verme. "
+    "Kısa markdown (3–8 madde veya kısa paragraflar). Grafik resmi görmüyorsun."
 )
 
 SYSTEM_PROMPT_EN = (
-    "You are the Alaz / AETHER-FIRE research assistant (pre-screening / analysis support; NOT operational orders). "
-    "Write a short, clear English commentary using ONLY the JSON evidence numbers in the user message. "
-    "Do not invent numbers. Interpret what is present; do not open a separate 'Missing' section for absent fields. "
+    "You are the Alaz / AETHER-FIRE research assistant. "
+    "PRIMARY GOAL: answer the user's question directly. "
+    "Source: ONLY the JSON evidence numbers + project context in the message. "
+    "Be question-first; do not re-narrate the whole table — pick numbers that answer the question. "
+    "Do not invent numbers; if evidence lacks something, say so clearly. "
     "tespit_sayisi / ham_tespit = FIRMS hotspot detections (NOT fire count or burned area); "
-    "siddet_frp / frp_* = radiative power (MW) — not burned area or total energy. "
-    "Harmonization was trained on a synthetic benchmark; VIIRS is a comparison reference (not absolute ground truth). "
-    "For the climatology envelope use monthly zarf_p10/p50/p90 and the target-year values; "
-    "for anomalies focus on period, z-score, and any period FRP summary. "
+    "siddet_frp / frp_* = radiative power (MW). "
+    "Harmonization was trained on a synthetic benchmark; VIIRS is a comparison reference. "
     "Do not present p-values as a definitive break; mention autocorrelation. "
-    "Do not issue dispatch orders or confident spread forecasts. "
-    "3–8 analytical bullets; use markdown. "
-    "You cannot see charts — only the numeric summary."
+    "No dispatch orders or confident spread forecasts. "
+    "Short markdown (3–8 bullets or short paragraphs). You cannot see charts."
 )
 
 
@@ -50,7 +72,7 @@ def chat_interpret(
     question: str | None = None,
     lang: str = "tr",
 ) -> dict[str, Any]:
-    """Dayanak JSON + odak/bölüm ile yorum üretir. Dönüş: {markdown, model}."""
+    """Kullanıcı sorusuna, tablo dayanak JSON’u ile cevap üretir. Dönüş: {markdown, model}."""
     key = (os.environ.get("DEEPSEEK_API_KEY") or "").strip()
     if not key:
         raise RuntimeError(
@@ -63,39 +85,40 @@ def chat_interpret(
     base = (os.environ.get("DEEPSEEK_BASE_URL") or "https://api.deepseek.com").rstrip("/")
     model = (os.environ.get("DEEPSEEK_MODEL") or "deepseek-chat").strip()
     q = (question or "").strip()[:500]
+    if not q:
+        q = (
+            "What does this section show for MODIS vs VIIRS in this ROI, and what should I watch for?"
+            if en
+            else "Bu bölümde MODIS ile VIIRS açısından ne görünüyor ve nelere dikkat etmeliyim?"
+        )
     sec = (section or "overview").strip()[:64]
     system = SYSTEM_PROMPT_EN if en else SYSTEM_PROMPT_TR
+    project = PROJECT_CONTEXT_EN if en else PROJECT_CONTEXT_TR
 
     if en:
         user_parts = [
-            f"Tab: {focus}",
-            f"Section: {sec}",
-            "Interpret only this section’s evidence numbers; do not drift to other tables.",
-            "Evidence numbers (JSON):",
+            f"USER QUESTION (answer this first):\n{q}",
+            project,
+            f"UI tab: {focus} · section/table: {sec}",
+            "Evidence from Alaz tables for this ROI (JSON — use as source only):",
             json.dumps(used_numbers, ensure_ascii=False, indent=2),
+            "Instructions: Answer the user question using the evidence. "
+            "For the visible table use gorunen_tablo_yillar / matrix / yillik_ozet; "
+            "roi_arsiv_tarih is the full archive span, NOT the on-screen table range. "
+            "Mention MODIS/VIIRS and sensor_baglam when relevant. Do not invent numbers.",
         ]
-        if q:
-            user_parts.append(f"User question: {q}")
-        else:
-            user_parts.append(
-                f"Write a short English AI insight for the «{sec}» table/chart: "
-                "what it shows, what to watch, artifact vs real signal."
-            )
     else:
         user_parts = [
-            f"Sekme: {focus}",
-            f"Tablo/bölüm: {sec}",
-            "Yalnızca bu bölümün dayanak sayılarını yorumla; diğer tablolara kayma.",
-            "Dayanak sayıları (JSON):",
+            f"KULLANICI SORUSU (önce bunu cevapla):\n{q}",
+            project,
+            f"UI sekmesi: {focus} · tablo/bölüm: {sec}",
+            "Alaz tablolarından ROI dayanak sayıları (JSON — yalnızca kaynak):",
             json.dumps(used_numbers, ensure_ascii=False, indent=2),
+            "Talimat: Kullanıcı sorusunu dayanak sayılarla cevapla. "
+            "Görünen tablo için 'gorunen_tablo_yillar' / matris / yillik_ozet kullan; "
+            "'roi_arsiv_tarih' tüm arşivdir, ekrandaki tablo aralığı değildir. "
+            "Gerektiğinde MODIS/VIIRS ve sensor_baglam alanını belirt. Sayı uydurma.",
         ]
-        if q:
-            user_parts.append(f"Kullanıcı sorusu: {q}")
-        else:
-            user_parts.append(
-                f"«{sec}» tablosu / grafiği için kısa Türkçe AI bakışı yaz: "
-                "ne anlatıyor, neye dikkat, artefakt mı gerçek sinyal mi."
-            )
 
     url = f"{base}/chat/completions"
     payload = {
@@ -104,8 +127,8 @@ def chat_interpret(
             {"role": "system", "content": system},
             {"role": "user", "content": "\n\n".join(user_parts)},
         ],
-        "temperature": 0.3,
-        "max_tokens": 1200,
+        "temperature": 0.35,
+        "max_tokens": 1400,
     }
     headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
 

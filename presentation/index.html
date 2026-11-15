@@ -1,0 +1,583 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Alaz — NASA Space Apps Sunumu</title>
+  <style>
+    @font-face {
+      font-family: "New Amsterdam";
+      src: url("./assets/NewAmsterdam-Regular.ttf") format("truetype");
+      font-weight: 400;
+      font-style: normal;
+      font-display: swap;
+    }
+
+    :root {
+      --black: #000000;
+      --blue: #0b60b0;
+      --sky: #40a2d8;
+      --cream: #f0edcf;
+      --white: #fff9f2;
+      --muted: #55606b;
+      --border: #e7e2dc;
+      --subtle: #f0f0f0;
+      --danger: #d6322a;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html, body {
+      height: 100%;
+      background: var(--black);
+      color: var(--black);
+      font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+      overflow: hidden;
+    }
+
+    .deck { height: 100%; width: 100%; position: relative; }
+
+    .slide {
+      display: none;
+      height: 100%;
+      width: 100%;
+      padding: clamp(1.6rem, 4vw, 3.4rem);
+      background: var(--white);
+      position: absolute;
+      inset: 0;
+      overflow: hidden;
+    }
+
+    .slide.active { display: grid; }
+
+    .slide.dark {
+      background: var(--black);
+      color: var(--cream);
+    }
+
+    .slide.dark .muted { color: #a8b0b8; }
+    .slide.dark .chip { background: #1a1a1a; color: var(--cream); border-color: #333; }
+
+    h1, h2, h3 {
+      font-family: "New Amsterdam", "Segoe UI", sans-serif;
+      font-weight: 400;
+      line-height: 1.12;
+      letter-spacing: 0.01em;
+    }
+
+    h1 { font-size: clamp(2.5rem, 5.5vw, 4.4rem); }
+    h2 { font-size: clamp(1.7rem, 3.4vw, 2.6rem); }
+    h3 { font-size: clamp(1.15rem, 2vw, 1.45rem); color: var(--blue); }
+
+    p, li { font-size: clamp(1.05rem, 1.55vw, 1.28rem); line-height: 1.45; }
+    .muted { color: var(--muted); }
+    .lead { font-size: clamp(1.15rem, 1.9vw, 1.4rem); max-width: 40rem; }
+
+    .brand-row {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+    }
+
+    .brand-row img { width: clamp(120px, 16vw, 200px); height: auto; }
+
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      padding: 0.35rem 0.75rem;
+      border: 1px solid var(--border);
+      background: var(--subtle);
+      font-size: 0.85rem;
+    }
+
+    .chip.sky { background: var(--sky); color: var(--black); border-color: var(--sky); }
+    .chip.blue { background: var(--blue); color: var(--white); border-color: var(--blue); }
+
+    .hero {
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: flex-start;
+      height: 100%;
+      gap: 1.15rem;
+    }
+
+    .stack {
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+      justify-content: center;
+      height: 100%;
+    }
+
+    .stack.top { justify-content: flex-start; }
+
+    .kicker {
+      font-size: 0.85rem;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--blue);
+      font-weight: 700;
+    }
+
+    .slide.dark .kicker { color: var(--sky); }
+
+    .big {
+      font-family: "New Amsterdam", sans-serif;
+      font-size: clamp(1.45rem, 2.8vw, 2.15rem);
+      line-height: 1.25;
+      max-width: 46rem;
+    }
+
+    ul.clean {
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 0.85rem;
+    }
+
+    ul.clean li {
+      padding-left: 1rem;
+      border-left: 3px solid var(--blue);
+    }
+
+    .three {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 1rem;
+      margin-top: 0.4rem;
+    }
+
+    .card {
+      background: var(--subtle);
+      border: 1px solid var(--border);
+      padding: 1.15rem 1.2rem;
+      min-height: 10.5rem;
+    }
+
+    .card .n {
+      font-family: "New Amsterdam", sans-serif;
+      font-size: 2rem;
+      color: var(--blue);
+      line-height: 1;
+      margin-bottom: 0.55rem;
+    }
+
+    .card p { font-size: 1rem; color: var(--muted); }
+
+    .two {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: clamp(1rem, 3vw, 2.2rem);
+      align-items: center;
+      height: 100%;
+    }
+
+    .diagram {
+      width: 100%;
+      max-height: min(58vh, 420px);
+      border: 1px solid var(--border);
+      background: var(--white);
+    }
+
+    .shot {
+      width: 100%;
+      max-height: min(58vh, 440px);
+      object-fit: contain;
+      border: 1px solid var(--border);
+      background: #fff9f2;
+    }
+
+    .pill-row { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+
+    .footer-note {
+      position: absolute;
+      left: clamp(1.6rem, 4vw, 3.4rem);
+      right: clamp(1.6rem, 4vw, 3.4rem);
+      bottom: 1.05rem;
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.8rem;
+      color: var(--muted);
+      pointer-events: none;
+    }
+
+    .slide.dark .footer-note { color: #7a848e; }
+
+    .progress {
+      position: fixed;
+      left: 0; right: 0; top: 0;
+      height: 3px;
+      background: #222;
+      z-index: 20;
+    }
+
+    .progress > span {
+      display: block;
+      height: 100%;
+      background: var(--sky);
+      width: 0%;
+      transition: width 0.2s ease;
+    }
+
+    .nav-hint {
+      position: fixed;
+      right: 1rem;
+      bottom: 1rem;
+      z-index: 21;
+      font-size: 0.75rem;
+      color: #888;
+      background: rgba(0,0,0,0.55);
+      padding: 0.35rem 0.6rem;
+      border: 1px solid #333;
+    }
+
+    .compare-box {
+      display: grid;
+      grid-template-columns: 1fr auto 1fr;
+      gap: 0.75rem;
+      align-items: stretch;
+      margin-top: 0.3rem;
+    }
+
+    .side {
+      background: var(--subtle);
+      border: 1px solid var(--border);
+      padding: 1.2rem;
+    }
+
+    .side h3 { margin-bottom: 0.5rem; }
+
+    .vs {
+      align-self: center;
+      font-family: "New Amsterdam", sans-serif;
+      font-size: 1.4rem;
+      color: var(--danger);
+    }
+
+    @media (max-width: 900px) {
+      .three, .two, .compare-box { grid-template-columns: 1fr; }
+      .vs { display: none; }
+      .slide { overflow: auto; }
+    }
+
+    @media print {
+      @page { size: 338mm 190mm; margin: 0; }
+      html, body {
+        height: auto !important;
+        overflow: visible !important;
+        background: #fff !important;
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
+      }
+      .progress, .nav-hint { display: none !important; }
+      .deck { height: auto !important; position: static !important; }
+      .slide {
+        display: grid !important;
+        position: relative !important;
+        inset: auto !important;
+        width: 338mm !important;
+        height: 190mm !important;
+        padding: 14mm 16mm !important;
+        overflow: hidden !important;
+        page-break-after: always;
+        break-after: page;
+      }
+      .slide:last-child { page-break-after: auto; break-after: auto; }
+      .slide.dark { background: #000 !important; color: #f0edcf !important; }
+      .diagram, .shot { max-height: 95mm !important; }
+      .footer-note {
+        position: absolute !important;
+        left: 16mm !important;
+        right: 16mm !important;
+        bottom: 8mm !important;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="progress"><span id="bar"></span></div>
+  <div class="nav-hint">← → veya boşluk · F tam ekran</div>
+
+  <div class="deck" id="deck">
+
+    <!-- 1 -->
+    <section class="slide dark active" data-title="Kapak">
+      <div class="hero">
+        <div class="brand-row">
+          <img src="./assets/logo.png" alt="Alaz" />
+          <span class="chip sky">NASA Space Apps 2026</span>
+        </div>
+        <h1>Alaz</h1>
+        <p class="big" style="color:#f0edcf">Yangın verisini herkesin anlayacağı dile çeviriyoruz.</p>
+        <p class="muted lead" style="color:#a8b0b8">
+          NASA’nın uydularından gelen sıcak nokta kayıtlarını birleştirip
+          “nerede, ne zaman yoğunluk var?” sorusuna net cevap veren araç.
+        </p>
+      </div>
+      <div class="footer-note"><span>Alaz</span><span></span></div>
+    </section>
+
+    <!-- 2 -->
+    <section class="slide" data-title="Bugün">
+      <div class="stack">
+        <p class="kicker">Bugün ne anlatacağız?</p>
+        <h2>Üç basit soru</h2>
+        <ul class="clean" style="margin-top:0.4rem">
+          <li><strong>NASA bizden ne istedi?</strong></li>
+          <li><strong>MODIS ve VIIRS nedir?</strong> — iki farklı “göz”</li>
+          <li><strong>Biz hangi problemi seçtik ve neden çözülmeli?</strong></li>
+        </ul>
+        <p class="muted" style="margin-top:0.5rem">Sonra kısaca Alaz’ın ne yaptığını gösteriyoruz. Detay site turunda.</p>
+      </div>
+      <div class="footer-note"><span>Alaz</span><span></span></div>
+    </section>
+
+    <!-- 3 -->
+    <section class="slide" data-title="NASA 3 şey">
+      <div class="stack top">
+        <p class="kicker">Challenge</p>
+        <h2>NASA’nın bizden istediği üç şey</h2>
+        <div class="three">
+          <div class="card">
+            <div class="n">1</div>
+            <h3>Birleştir</h3>
+            <p>Eski ve yeni uydu kayıtlarını tek bir hikâyede okunabilir yap.</p>
+          </div>
+          <div class="card">
+            <div class="n">2</div>
+            <h3>Göster</h3>
+            <p>Bir bölge seçip yıllar / aylar boyunca yangın aktivitesine bakabil.</p>
+          </div>
+          <div class="card">
+            <div class="n">3</div>
+            <h3>Karşılaştır</h3>
+            <p>“Bu dönem her zamankinden mi yoğun?” sorusuna cevap ver.</p>
+          </div>
+        </div>
+        <p class="muted" style="margin-top:0.6rem">
+          Kısaca: haritada bir yer seç → geçmişi adil oku → alışılmadık dönemleri fark et.
+        </p>
+      </div>
+      <div class="footer-note"><span>Alaz</span><span></span></div>
+    </section>
+
+    <!-- 4 -->
+    <section class="slide" data-title="İki göz">
+      <div class="stack">
+        <p class="kicker">Uydular</p>
+        <h2>Aynı Dünya’ya bakan iki farklı kamera</h2>
+        <div class="compare-box">
+          <div class="side">
+            <h3>MODIS</h3>
+            <p><strong>Daha eski</strong> sistem · 2000’lerden beri kayıt var.</p>
+            <p class="muted" style="margin-top:0.55rem">Görüş alanı daha kaba — büyük karelerle bakıyor.</p>
+          </div>
+          <div class="vs">vs</div>
+          <div class="side">
+            <h3>VIIRS</h3>
+            <p><strong>Daha yeni</strong> sistem · 2012’den beri kayıt var.</p>
+            <p class="muted" style="margin-top:0.55rem">Daha ince görüyor — aynı yangında daha çok nokta çıkar.</p>
+          </div>
+        </div>
+        <p class="lead muted" style="margin-top:0.8rem">
+          İkisi de “sıcak nokta” bulur. Ama <strong>aynı yangına bakınca sayıları aynı çıkmaz</strong>.
+        </p>
+      </div>
+      <div class="footer-note"><span>Alaz</span><span></span></div>
+    </section>
+
+    <!-- 5 -->
+    <section class="slide" data-title="Diyagram">
+      <div class="stack top" style="gap:1rem">
+        <div>
+          <p class="kicker">Görsel</p>
+          <h2>Neden sayılar uyuşmaz?</h2>
+          <p class="muted lead">Küçük karelerle bakan kamera, aynı ateşte daha çok nokta yazar.</p>
+        </div>
+        <img class="diagram" src="./assets/diagram-sensors.svg" alt="MODIS kaba, VIIRS ince çözünürlük" />
+      </div>
+      <div class="footer-note"><span>Alaz</span><span></span></div>
+    </section>
+
+    <!-- 6 -->
+    <section class="slide" data-title="Problem">
+      <div class="stack top" style="gap:1rem">
+        <div>
+          <p class="kicker">Seçtiğimiz problem</p>
+          <h2>2012’de grafik “fırlıyor” — ama yangın mı arttı?</h2>
+          <p class="muted lead">
+            VIIRS devreye girince ham toplamlar yükselir. Bu çoğu zaman
+            <strong>daha iyi kamera</strong> demektir; her zaman daha çok yangın demek değildir.
+          </p>
+        </div>
+        <img class="diagram" src="./assets/diagram-jump.svg" alt="2012 sahte sıçrama diyagramı" />
+      </div>
+      <div class="footer-note"><span>Alaz</span><span></span></div>
+    </section>
+
+    <!-- 7 -->
+    <section class="slide" data-title="Neden">
+      <div class="stack">
+        <p class="kicker">Neden çözülmeli?</p>
+        <h2>Bu problem çözülmezse ne olur?</h2>
+        <ul class="clean">
+          <li><strong>Yanlış alarm:</strong> “Yangınlar arttı” sanırsınız — oysa kamera değişmiştir.</li>
+          <li><strong>Adil karşılaştırma yok:</strong> 2005 ile 2020’yi yan yana koyamazsınız.</li>
+          <li><strong>Karar zorlaşır:</strong> Orman, AFAD, araştırmacı “bu yaz normal mi?” diye bakamaz.</li>
+        </ul>
+        <p class="big" style="margin-top:0.6rem;color:var(--blue)">
+          Bizim işimiz: farkı gizlemek değil — görünür kılıp adil okumak.
+        </p>
+      </div>
+      <div class="footer-note"><span>Alaz</span><span></span></div>
+    </section>
+
+    <!-- 8 -->
+    <section class="slide" data-title="Biz ne yaptık">
+      <div class="stack">
+        <p class="kicker">Alaz’ın cevabı</p>
+        <h2>Basitçe ne yaptık?</h2>
+        <ul class="clean">
+          <li>NASA’nın açık yangın / sıcak nokta verisini aldık.</li>
+          <li>Eski ve yeni kayıtları <strong>aynı ölçeğe</strong> çekmeye çalıştık.</li>
+          <li>Harita + takvim + özet ile “nerede / ne zaman yoğun?” sorusunu cevapladık.</li>
+        </ul>
+        <div class="pill-row" style="margin-top:0.5rem">
+          <span class="chip blue">Bir bölge seç</span>
+          <span class="chip">Geçmişi oku</span>
+          <span class="chip">Anormal dönemi gör</span>
+        </div>
+        <p class="muted" style="margin-top:0.5rem">
+          Not: Bu bir müdahale emri sistemi değil — analiz / ön bakış aracı.
+        </p>
+      </div>
+      <div class="footer-note"><span>Alaz</span><span></span></div>
+    </section>
+
+    <!-- 9 -->
+    <section class="slide" data-title="Usecase">
+      <div class="stack">
+        <p class="kicker">Örnek</p>
+        <h2>Manavgat kıyısı — kafada canlanan senaryo</h2>
+        <div class="three">
+          <div class="card">
+            <h3>Analist</h3>
+            <p>Haritada bir kutu çizer. “Bu yaz her zamankinden mi yoğun?” diye takvime bakar.</p>
+          </div>
+          <div class="card">
+            <h3>Araştırmacı</h3>
+            <p>2012’deki sıçramanın kamera değişimi mi yoksa gerçek artış mı olduğunu ayırır.</p>
+          </div>
+          <div class="card">
+            <h3>Ekip özeti</h3>
+            <p>Kısa brifing alır: nereye bakmalı — emir değil, yön gösterme.</p>
+          </div>
+        </div>
+      </div>
+      <div class="footer-note"><span>Alaz</span><span></span></div>
+    </section>
+
+    <!-- 10 -->
+    <section class="slide" data-title="Ürün">
+      <div class="two">
+        <div class="stack">
+          <p class="kicker">Ne görüyorsunuz?</p>
+          <h2>Seçtiğiniz alanda aktivite</h2>
+          <ul class="clean">
+            <li>Haritada yoğunluk</li>
+            <li>Yıllara göre takvim</li>
+            <li>Canlı site turunda birlikte açacağız</li>
+          </ul>
+        </div>
+        <img class="shot" src="./assets/02-map-roi.png" alt="Manavgat bölgesi aktivite örneği" />
+      </div>
+      <div class="footer-note"><span>Alaz</span><span></span></div>
+    </section>
+
+    <!-- 11 -->
+    <section class="slide" data-title="Özet">
+      <div class="stack">
+        <p class="kicker">Tek slaytta özet</p>
+        <h2>Alaz neyi çözüyor?</h2>
+        <ul class="clean">
+          <li><strong>NASA istedi:</strong> birleştir · göster · karşılaştır</li>
+          <li><strong>Zorluk:</strong> eski ve yeni kamera aynı dili konuşmuyor</li>
+          <li><strong>Biz:</strong> ortak dil + harita/takvim ile adil okuma</li>
+        </ul>
+        <p class="big" style="margin-top:0.7rem">
+          Sıcak nokta ≠ yangın sayısı. Amacımız panik yaratmak değil; doğru okumak.
+        </p>
+      </div>
+      <div class="footer-note"><span>Alaz</span><span></span></div>
+    </section>
+
+    <!-- 12 -->
+    <section class="slide dark" data-title="Kapanış">
+      <div class="hero">
+        <div class="brand-row">
+          <img src="./assets/logo.png" alt="Alaz" />
+          <span class="chip sky">Teşekkürler</span>
+        </div>
+        <h1>Alaz</h1>
+        <p class="big" style="color:#f0edcf">Şimdi canlı sitede birlikte bakalım.</p>
+        <p class="muted" style="color:#a8b0b8;max-width:36rem">
+          Sorularınız için buradayız. Teknik detay isteyen olursa sonra açarız —
+          önce hikâyeyi net tutuyoruz.
+        </p>
+        <div class="pill-row">
+          <span class="chip">NASA FIRMS verisi</span>
+          <span class="chip">Space Apps 2026</span>
+        </div>
+      </div>
+      <div class="footer-note"><span>Sorular?</span><span></span></div>
+    </section>
+
+  </div>
+
+  <script>
+    const slides = [...document.querySelectorAll(".slide")];
+    const bar = document.getElementById("bar");
+    let i = 0;
+
+    function show(n) {
+      i = Math.max(0, Math.min(slides.length - 1, n));
+      slides.forEach((s, idx) => s.classList.toggle("active", idx === i));
+      bar.style.width = ((i + 1) / slides.length * 100) + "%";
+      slides.forEach((s, idx) => {
+        const foot = s.querySelector(".footer-note span:last-child");
+        if (foot) foot.textContent = (idx + 1) + " / " + slides.length;
+      });
+      history.replaceState(null, "", "#" + (i + 1));
+    }
+
+    function next() { show(i + 1); }
+    function prev() { show(i - 1); }
+
+    window.addEventListener("keydown", (e) => {
+      if (["ArrowRight", "ArrowDown", "PageDown", " ", "Enter"].includes(e.key)) {
+        e.preventDefault(); next();
+      } else if (["ArrowLeft", "ArrowUp", "PageUp", "Backspace"].includes(e.key)) {
+        e.preventDefault(); prev();
+      } else if (e.key === "Home") { show(0); }
+      else if (e.key === "End") { show(slides.length - 1); }
+      else if (e.key.toLowerCase() === "f") {
+        if (!document.fullscreenElement) document.documentElement.requestFullscreen?.();
+        else document.exitFullscreen?.();
+      }
+    });
+
+    let tx = null;
+    window.addEventListener("touchstart", (e) => { tx = e.changedTouches[0].screenX; }, { passive: true });
+    window.addEventListener("touchend", (e) => {
+      if (tx == null) return;
+      const dx = e.changedTouches[0].screenX - tx;
+      if (Math.abs(dx) > 50) (dx < 0 ? next : prev)();
+      tx = null;
+    }, { passive: true });
+
+    const hash = parseInt(location.hash.replace("#", ""), 10);
+    show(Number.isFinite(hash) && hash >= 1 ? hash - 1 : 0);
+  </script>
+</body>
+</html>

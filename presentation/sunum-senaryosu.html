@@ -1,0 +1,166 @@
+<!DOCTYPE html><html lang=tr><head><meta charset=utf-8><title>Alaz Sunum Senaryosu</title>
+<style>
+body{font-family:Segoe UI,Helvetica,Arial,sans-serif;max-width:820px;margin:24px auto;padding:0 16px;color:#111;line-height:1.45}
+h1{font-size:1.8rem}h2{font-size:1.35rem;margin-top:1.6rem;border-bottom:1px solid #ddd;padding-bottom:4px}
+h3{font-size:1.1rem;margin-top:1.2rem}table{border-collapse:collapse;width:100%;margin:10px 0;font-size:0.92rem}
+th,td{border:1px solid #ddd;padding:6px 8px;vertical-align:top}th{background:#f0f0f0;text-align:left}
+blockquote{margin:8px 0;padding:8px 12px;border-left:4px solid #40a2d8;background:#f7f7f7}
+pre{background:#f4f4f4;padding:10px;overflow:auto}li{margin-left:1.1rem}
+@media print{body{margin:12mm}}
+</style></head><body>
+<h1>Alaz — Sunum senaryosu &amp; soru hazırlığı</h1>
+<br/>
+<p>Bu dosya <strong>jüriye/PDF’e gösterilmez</strong>. Siz konuşurken ve soru gelince kullanın.  </p>
+<p>Akış: kısa slayt sunumu → canlı website.</p>
+<br/>
+<hr/>
+<br/>
+<h2>1) Konuşma senaryosu (≈6–8 dk slayt + site)</h2>
+<br/>
+<h3>Açılış (Kapak)</h3>
+<blockquote>“Alaz, NASA Space Apps’te CONAE’nin challenge’ı için: iki farklı uydu sensörünün yangın sıcak noktalarını aynı dile çeviren bir araştırma prototipi.”</blockquote>
+<br/>
+<p>Tek cümle iddia:</p>
+<blockquote>“Yangın tahmin etmiyoruz; sensör farkını görünür kılıp uzun dönemi adil okuyoruz.”</blockquote>
+<br/>
+<h3>NASA ne istedi?</h3>
+<p>Sade dil:</p>
+<blockquote>“2000’lerden beri MODIS var, 2012’den beri VIIRS var. İkisi aynı yangına bakıyor ama farklı çözünürlükte. Ham sayıları birleştirince 2012’de sahte bir sıçrama oluşuyor. Challenge: bunu birleştirip web’de bölge seçip zamanı inceleyebileceğimiz bir araç.”</blockquote>
+<br/>
+<h3>Problem (diyagramlar)</h3>
+<blockquote>“MODIS pikseli kabaca 1 km, VIIRS 375 m. VIIRS daha ince görür → aynı yangında daha çok nokta. Bu, ‘yangın arttı’ demek değildir.”</blockquote>
+<br/>
+<h3>Biz ne yaptık?</h3>
+<blockquote>“NASA FIRMS verisini alıyoruz, güven filtresinden geçiriyoruz, MODIS’i VIIRS-eşdeğer ölçeğe çekiyoruz, sonra harita / kırılma / takvim / brifing olarak sunuyoruz.”</blockquote>
+<br/>
+<h3>Usecase</h3>
+<blockquote>“Örnek: Manavgat kıyısı. Orman/AFAD analisti ‘bu yaz her zamankinden mi yoğun?’ diye bakabilir. Araştırmacı 2012 sıçramasının sensör mü yoksa gerçek mi olduğunu görebilir. Operasyon için ön tarama — emir değil.”</blockquote>
+<br/>
+<h3>Ürün slaytları (kısa tutun — site gelecek)</h3>
+<li>Harita: “Bölge çiziyoruz, tespitleri / yoğunluğu görüyoruz.”</li>
+<li>Kırılma: “2012’de ham seri zıplıyor; harmonize daha düzgün.”</li>
+<li>Takvim: “Challenge’ın istediği burning calendar — ay vs tarihsel medyan.”</li>
+<br/>
+<h3>İstek vs Alaz + yorumlar</h3>
+<p>Vurgu: <strong>dürüst sınırlar</strong></p>
+<blockquote>“Hotspot yangın sayısı değildir. VIIRS mutlak yer-gerçeği değildir. Güven eşiğini grafiği güzelleştirmek için oynatmıyoruz.”</blockquote>
+<br/>
+<h3>Kanıt</h3>
+<blockquote>“Türkiye arşivinde hold-out aylarda harmonize MAE ≈ 4.9, ham ≈ 21.9. Bu inter-sensor anlaşma — olay doğrulaması değil; onu açıkça söylüyoruz.”</blockquote>
+<br/>
+<h3>Kapanış → site</h3>
+<blockquote>“Şimdi canlı sitede Manavgat demosunu açıyoruz.”</blockquote>
+<br/>
+<p><strong>Site sırası (2–3 dk):</strong> Gerçek arşiv → Demo ROI → Harita → Kırılma → Takvim → (isterseniz) Model / Brifing.</p>
+<br/>
+<hr/>
+<br/>
+<h2>2) Terimler — soru gelirse ne diyeceksiniz?</h2>
+<br/>
+<h3>Veri kaynağı nedir?</h3>
+<table>
+<tr><th>Terim</th><th>Sade cevap</th></tr>
+<tr><td>**NASA FIRMS**</td><td>Fire Information for Resource Management System. NASA’nın uyduyla tespit ettiği aktif yangın / sıcak nokta yayın sistemi.</td></tr>
+<tr><td>**Hotspot / sıcak nokta**</td><td>Uydunun “burada anormal sıcaklık var” dediği **piksel tespiti**. Yangın sayısı veya yanmış alan değildir. Aynı yangın birden fazla geçişte tekrar sayılabilir.</td></tr>
+<tr><td>**MODIS**</td><td>Terra/Aqua uydularındaki sensör. ~1 km piksel. 2000’den beri uzun tarih.</td></tr>
+<tr><td>**VIIRS**</td><td>Daha yeni / ince sensör (~375 m). SNPP, NOAA-20, NOAA-21. 2012’den beri.</td></tr>
+<tr><td>**SNPP**</td><td>Suomi NPP uydusu. Canlı NRT beslemesi 2026-11-02’de bitti; arşivde tarihsel olarak duruyor. Canlıda NOAA-20/21 kullanıyoruz.</td></tr>
+<tr><td>**NRT vs Standard**</td><td>NRT = Near Real-Time (hızlı, geçici). Standard = bilim kalitesi, uzun dönem analiz için tercih.</td></tr>
+<tr><td>**FRP**</td><td>Fire Radiative Power (MW). Tespit anındaki radyatif güç. Alan veya toplam enerji değildir.</td></tr>
+<tr><td>**ROI**</td><td>Region of Interest — analiz için çizdiğiniz alan.</td></tr>
+<tr><td>**H3**</td><td>Uber’in altıgen grid’i. Yoğunluğu hücre hücre göstermek için. Res-7 ≈ 5,2 km².</td></tr>
+</table>
+<br/>
+<h3>Harmonizasyon / model</h3>
+<table>
+<tr><th>Terim</th><th>Sade cevap</th></tr>
+<tr><td>**Harmonizasyon**</td><td>MODIS ile VIIRS sayılarını **karşılaştırılabilir** hale getirmek. “İki Excel’i yapıştırmak” değil; ölçekleri hizalamak.</td></tr>
+<tr><td>**VIIRS-eşdeğer**</td><td>Modelin “bu MODIS tespiti VIIRS dünyasında kabaca neye denk gelir?” tahmini.</td></tr>
+<tr><td>**ML (Machine Learning)**</td><td>Makine öğrenmesi. Bizde: tarihsel/simüle eşleşmelerden öğrenip MODIS → VIIRS ölçeği tahmin eden model (Gradient Boosting ailesi / HGB). Elle sabit çarpan yerine bağlama göre (biome, açı, FRP vb.) öğrenir.</td></tr>
+<tr><td>**Sentetik benchmark**</td><td>Fiziksel olarak **simüle** edilmiş eğitim seti. Gerçek FIRMS değil; bilinen “doğru cevap” olduğu için modeli ölçebiliriz.</td></tr>
+<tr><td>**Gerçek arşiv karşılaştırması**</td><td>Türkiye FIRMS’inde aylık MODIS sayısını VIIRS ile kıyaslamak. VIIRS yine **referans**, mutlak ground truth değil.</td></tr>
+<tr><td>**Hibrit α**</td><td>Saf ML çıktısını sönümleyip / baseline ile karıştırarak daha dengeli seri üretmek. “Her zaman ML kazansın” demiyoruz.</td></tr>
+<tr><td>**Platform normalizasyonu**</td><td>NOAA-21 eklenince ham toplamın yapay şişmesini azaltmak için çalışan platform sayısına göre ölçekleme.</td></tr>
+</table>
+<br/>
+<h3>İstatistik / doğrulama</h3>
+<table>
+<tr><th>Terim</th><th>Sade cevap</th></tr>
+<tr><td>**MAE**</td><td>Mean Absolute Error — ortalama mutlak hata. “Ay bazında tahminimize VIIRS referansından ortalama kaç birim uzakız?”</td></tr>
+<tr><td>**RMSE**</td><td>Karekök ortalama karesel hata. Büyük hataları daha çok cezalandırır.</td></tr>
+<tr><td>**Hold-out**</td><td>Model/kalibrasyon fit edilirken **görmediği** sonraki aylar. Ezber mi, genelleme mi diye bakarız.</td></tr>
+<tr><td>**p-değeri**</td><td>“Bu kırılma şans eseri mi?” istatistiği. Otokorelasyon abartabilir; **p&amp;lt;0.05 kesin kırılma değildir**. Adım % ile birlikte okunur.</td></tr>
+<tr><td>**Pettitt / Chow**</td><td>Zaman serisinde yapısal kırılma testleri (özellikle 2012 civarı).</td></tr>
+<tr><td>**Anomali**</td><td>Seçilen ayın, aynı ayın çok yıllı medyanına göre farkı (%).</td></tr>
+<tr><td>**P10 / P50 / P90**</td><td>Dağılımın yüzde 10 / 50 / 90 noktaları. Takvimde belirsizlik bandı — “yangın sayısı garantisi” değil.</td></tr>
+<tr><td>**Confidence (güven)**</td><td>FIRMS’in tespitin ne kadar emin olduğu. MODIS 0–100; VIIRS low/nominal/high. **Aynı ölçek değiller.** Policy A: MODIS ≥30, VIIRS nominal+high.</td></tr>
+</table>
+<br/>
+<h3>Ürün sekmeleri (site turunda)</h3>
+<table>
+<tr><th>Sekme</th><th>Bir cümle</th></tr>
+<tr><td>**Görev haritası**</td><td>Seçilen bölgedeki tespitler / yoğunluk.</td></tr>
+<tr><td>**Yapısal kırılma**</td><td>2012 sensör geçişi ham seriyi şişiriyor mu?</td></tr>
+<tr><td>**Yanma takvimi**</td><td>Yıl × gün/ay ısı haritası + anomali.</td></tr>
+<tr><td>**Sıcak nokta açıklayıcı**</td><td>Piksel ayak izi, bow-tie, tek tespit harmonizasyonu.</td></tr>
+<tr><td>**Brifing**</td><td>Ön tarama metni + CSV. Emir değil.</td></tr>
+<tr><td>**Model ve doğrulama**</td><td>Sentetik benchmark + gerçek arşiv metrikleri.</td></tr>
+</table>
+<br/>
+<hr/>
+<br/>
+<h2>3) Sık sorular — hazır cevaplar</h2>
+<br/>
+<p><strong>“Yangını tahmin ediyor musunuz?”</strong>  </p>
+<p>Hayır. Geçmiş/canlı tespitleri okunabilir kılıyoruz. Tahmin / dispatch iddiası yok.</p>
+<br/>
+<p><strong>“Bunu itfaiye kullanabilir mi?”</strong>  </p>
+<p>Ön tarama / durum farkındalığı için evet; <strong>müdahale emri</strong> olarak hayır. Hava, yakıt, topoğrafya yok.</p>
+<br/>
+<p><strong>“VIIRS doğru kabul ediliyor mu?”</strong>  </p>
+<p>Hayır. Karşılaştırma referansı. Bulut, örnekleme, geçiş zamanı farkı var. Ground truth için yanmış alan / yüksek çözünürlüklü görüntü gerekir — gelecek iş.</p>
+<br/>
+<p><strong>“Neden Türkiye?”</strong>  </p>
+<p>Pilot arşiv: yerel diskte hızlı demo, gerçek FIRMS. Challenge küresel ROI de açıyor; coğrafi genelleme henüz doğrulanmadı.</p>
+<br/>
+<p><strong>“ML ne öğrendi?”</strong>  </p>
+<p>Simüle MODIS↔VIIRS eşleşmelerinde, MODIS özelliklerinden VIIRS-eşdeğer yoğunluk/ölçek. Sonra gerçek arşivde aylık uyumu ölçüyoruz.</p>
+<br/>
+<p><strong>“Başarı metriğiniz ne?”</strong>  </p>
+<p>Öncelikle: sensör farkını görünür kılmak + adil zaman serisi. Sayısal: hold-out’ta inter-sensor MAE’nin hamdan iyi olması. Olay düzeyinde doğrulama iddiası yok.</p>
+<br/>
+<p><strong>“Hotspot ile yangın farkı?”</strong>  </p>
+<p>Hotspot = uydu pikseli. Yangın olayı = ayrı kimlik (biz üretmiyoruz). Yanmış alan = ayrı ürün.</p>
+<br/>
+<p><strong>“Neden 2012 önemli?”</strong>  </p>
+<p>VIIRS başlıyor. Ham MODIS+VIIRS toplamı zıplar; bu çoğu zaman sensör, her zaman daha çok yangın değil.</p>
+<br/>
+<p><strong>“NOAA-21 / SNPP ne oldu?”</strong>  </p>
+<p>SNPP canlı NRT bitti. Canlıda NOAA-20+21. Platform sayısı artınca toplamın şişmemesi için normalize ediyoruz.</p>
+<br/>
+<p><strong>“Rakip takımlardan farkınız?”</strong>  </p>
+<p>Dürüst sınırlar UI’da; iki doğrulama rayı; güven eşiğini cherry-pick etmeme; canlı+arşiv tek üründe; kırılma istatistiğini p’ye indirgememe.</p>
+<br/>
+<hr/>
+<br/>
+<h2>4) Söylemeyin / söyleyin</h2>
+<br/>
+<table>
+<tr><th>Söylemeyin</th><th>Söyleyin</th></tr>
+<tr><td>“Yangın sayısını buluyoruz”</td><td>“Sıcak nokta tespiti yoğunluğunu inceliyoruz”</td></tr>
+<tr><td>“VIIRS gerçeği”</td><td>“VIIRS karşılaştırma referansı”</td></tr>
+<tr><td>“Operasyonel sistem”</td><td>“Araştırma prototipi / ön tarama”</td></tr>
+<tr><td>“%99 doğru”</td><td>“Hold-out’ta MAE düşüyor; olay doğrulaması yok”</td></tr>
+<tr><td>“AI her şeyi çözüyor”</td><td>“ML ölçek tahminine yardım ediyor; sınırları açık”</td></tr>
+</table>
+<br/>
+<hr/>
+<br/>
+<h2>5) Demo ROI (site için)</h2>
+<br/>
+<li>**Manavgat / Antalya kıyısı**  </li>
+<li>≈ 36.55–37.05°N, 31.20–31.75°E  </li>
+<li>Kaynak: **Gerçek arşiv** → Demo ROI yükle  </li>
+<br/>
+<p>Hazır cümle:</p>
+<blockquote>“Bu kutu yaklaşık 2700 km²; arşivde 2001’den 2026’ya yedi binin üzerinde ham tespit var. Şimdi kırılma ve takvime bakalım.”</blockquote></body></html>

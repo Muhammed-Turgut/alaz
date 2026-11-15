@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="utf-8"/>
+<title>Alaz — Algoritma ve ML Rehberi</title>
+<style>
+  @page { size: A4; margin: 16mm 14mm; }
+  body {
+    font-family: "Segoe UI", Helvetica, Arial, sans-serif;
+    color: #111; line-height: 1.45; font-size: 10.5pt;
+    max-width: 820px; margin: 0 auto; padding: 8px 12px 24px;
+  }
+  h1 { font-size: 20pt; color: #0b60b0; margin: 0 0 8px; }
+  h2 {
+    font-size: 13.5pt; color: #0b60b0; margin: 18px 0 8px;
+    border-bottom: 2px solid #40a2d8; padding-bottom: 3px;
+    page-break-after: avoid;
+  }
+  h3 { font-size: 11.5pt; margin: 12px 0 6px; color: #000; page-break-after: avoid; }
+  p { margin: 5px 0; }
+  p.num { margin: 4px 0 4px 12px; }
+  ul { margin: 4px 0 8px 18px; padding: 0; }
+  li { margin: 3px 0; }
+  table {
+    border-collapse: collapse; width: 100%; margin: 8px 0 12px;
+    font-size: 9.5pt; page-break-inside: avoid;
+  }
+  th, td { border: 1px solid #ccc; padding: 5px 7px; vertical-align: top; text-align: left; }
+  th { background: #e8f4fc; }
+  blockquote {
+    margin: 8px 0; padding: 8px 12px; border-left: 4px solid #0b60b0;
+    background: #f3f8fc; font-style: italic;
+  }
+  pre {
+    background: #f5f5f5; border: 1px solid #e0e0e0; padding: 10px;
+    font-size: 8.5pt; overflow: hidden; white-space: pre-wrap;
+  }
+  code { background: #f0f0f0; padding: 1px 4px; font-size: 9pt; }
+  hr { border: none; border-top: 1px solid #ddd; margin: 14px 0; }
+  .eq { text-align: center; margin: 10px 0; font-family: Georgia, serif; font-size: 12pt; }
+  .cover {
+    border: 2px solid #0b60b0; padding: 16px 18px; margin-bottom: 16px;
+    background: #fff9f2;
+  }
+  .cover .meta { color: #55606b; font-size: 9.5pt; margin-top: 6px; }
+</style>
+</head>
+<body>
+<div class="cover">
+  <h1 style="margin:0">Alaz — Algoritma &amp; Makine Öğrenmesi</h1>
+  <p style="margin:6px 0 0"><strong>İç eğitim notu</strong> · jüriye gösterme · sunum ML sorumlusu için</p>
+  <p class="meta">Kaynak: backend/src/engine + analytics · NASA Space Apps 2026 · AETHER-FIRE</p>
+</div>
+<h1>Alaz — Algoritma &amp; Makine Öğrenmesi Rehberi</h1>
+<br/>
+<p><strong>Kimin için:</strong> Sunumda / soru-cevapta algoritma ve ML kısmından sorumlu arkadaş  </p>
+<p><strong>Amaç:</strong> Ne yaptığımızı, neden yaptığımızı, jüriye nasıl anlatacağımızı öğrenmek  </p>
+<p><strong>Kaynak kod:</strong> <code>backend/src/engine/</code>, <code>backend/src/analytics/</code></p>
+<br/>
+<blockquote>Alaz yangın <strong>tahmin</strong> etmez. MODIS ve VIIRS sıcak nokta kayıtlarını <strong>karşılaştırılabilir</strong> hale getirir.</blockquote>
+<br/>
+<hr/>
+<br/>
+<h2>0) Büyük resim (2 dakika)</h2>
+<br/>
+<p>İki paralel yol var; karıştırma:</p>
+<br/>
+<table>
+<tr><th>Yol</th><th>Dosya</th><th>Ne ölçeğinde?</th><th>ML mi?</th></tr>
+<tr><td>**A — Tespit düzeyi (ML)**</td><td>`harmonizer_ml.py`</td><td>Her MODIS noktası → VIIRS-eşdeğer `n` ve `frp`</td><td>Evet — HistGradientBoosting</td></tr>
+<tr><td>**B — Hücre / ay düzeyi (hibrit α)**</td><td>`hybrid_harmonizer.py`</td><td>Aylık aktif H3 hücre sayısı</td><td>Hayır — OLS `Y = αX`</td></tr>
+<tr><td>**C — Aylık post-kalibrasyon**</td><td>`reference_comparison.py`</td><td>Ham/harmonize seriyi VIIRS referansına yaklaştırma</td><td>Hayır — grid search (MAE)</td></tr>
+<tr><td>**D — Yapısal kırılma**</td><td>`stats_diagnostics.py`</td><td>2012 sensör geçişi testi</td><td>Hayır — Pettitt + Chow</td></tr>
+</table>
+<br/>
+<p>UI’da “harmonize / VIIRS-eşdeğer” çoğunlukla <strong>A</strong>; “Hibrit α / hibrit katmanlar” <strong>B</strong>; doğrulama tablosundaki MAE iyileşmesi çoğunlukla <strong>A+C</strong>.</p>
+<br/>
+<hr/>
+<br/>
+<h2>1) Veri nedir? (önce bunu bil)</h2>
+<br/>
+<h3>FIRMS sıcak nokta (hotspot)</h3>
+<p>Uydunun “bu pikselle anormal sıcaklık var” dediği <strong>tespit</strong>.  </p>
+<p><strong>≠ yangın sayısı ≠ yanmış alan.</strong> Aynı yangın birden fazla geçişte tekrar sayılabilir.</p>
+<br/>
+<h3>MODIS vs VIIRS</h3>
+<ul>
+<li><strong>MODIS</strong> (~1 km, 2000+): daha kaba → aynı yangında daha az nokta  </li>
+<li><strong>VIIRS</strong> (~375 m, 2012+): daha ince → aynı yangında daha çok nokta  </li>
+</ul>
+<br/>
+<p>Ham toplamları yapıştırmak <strong>2012’de sahte sıçrama</strong> üretir.</p>
+<br/>
+<h3>H3 (Uber)</h3>
+<p>Dünyayı <strong>altıgen hücrelere</strong> bölen grid. Alaz’da <strong>res-7 ≈ 5,2 km²</strong>.  </p>
+<p>Yoğunluk ve hibrit hesaplarda “nokta yağmuru” yerine “hücre aktivitesi” okumak için kullanılır.  </p>
+<p><strong>H3 bir ML modeli değil</strong> — mekânsal kutu sistemi.</p>
+<br/>
+<hr/>
+<br/>
+<h2>2) Ön işlem (pipeline hijyeni)</h2>
+<br/>
+<p>Kod: <code>prepare.py</code>, <code>confidence_policies.py</code>, <code>static_filter.py</code></p>
+<br/>
+<p class="num">Ortak şema (lat/lon/ts/FRP/confidence/instrument…)  </p>
+<p class="num"><strong>Güven filtresi Policy A (üretim):</strong>  </p>
+<p>   - MODIS: <code>confidence ≥ 30</code>  </p>
+<p>   - VIIRS: <code>nominal</code> + <code>high</code> (<code>low</code> elenir)  </p>
+<p class="num">Policy B/C sadece <strong>duyarlılık tablosu</strong> — ana sonucu “güzel görünsün” diye değiştirmiyoruz.  </p>
+<p class="num">Statik termal kaynak filtresi (fabrika vb. kalıcı ısıyı azaltmaya çalışır; gerçek yangını da kesebilir).  </p>
+<p class="num">Bow-tie / piksel alanı, diurnal (gün-içi) faktörler, biome etiketi — ML özelliklerine girdi.</p>
+<br/>
+<p><strong>Jüri cümlesi:</strong> “Güven eşiğini cherry-pick etmiyoruz; A sabit, B/C yanında raporlanıyor.”</p>
+<br/>
+<hr/>
+<br/>
+<h2>3) Yol A — Makine öğrenmesi: Quantile Harmonizer</h2>
+<br/>
+<p>Kod: <code>harmonizer_ml.py</code> · model: <code>aether-fire-hgb-q-v2</code> · <code>HistGradientBoostingRegressor</code> (scikit-learn)</p>
+<br/>
+<h3>3.1 Ne öğreniyor?</h3>
+<p>Her <strong>MODIS tespiti</strong> için, aynı ateşin yakındaki VIIRS geçişindeki eşdeğerini tahmin eder:</p>
+<br/>
+<ul>
+<li><code>n</code> → MODIS ayak izi içinde VIIRS-ölçekli hotspot sayısı  </li>
+<li><code>frp</code> → VIIRS-ölçekli Fire Radiative Power (MW)</li>
+</ul>
+<br/>
+<p>Hedefler formülle yazılmaz; <strong>eşleştirilmiş ayak izlerinden</strong> (<code>match_footprints</code>) gelir. İyi skor = “kural ezberledim” değil, “sensör çiftinden öğrendim” kanıtı.</p>
+<br/>
+<h3>3.2 Eğitim hedefi nasıl üretilir?</h3>
+<p class="num">MODIS ve VIIRS tespitleri zaman+mekân penceresinde eşleşir (<code>max_dt_hours ≈ 4.5</code>).  </p>
+<p class="num">VIIRS pikselinin “kütlesi” kesişen MODIS ayak izlerine <strong>oranla</strong> bölüştürülür.  </p>
+<p class="num">Her MODIS satırına <code>n_eq</code>, <code>frp_eq</code> yazılır.</p>
+<br/>
+<h3>3.3 Hangi model?</h3>
+<p><strong>HistGradientBoosting</strong> (histogram tabanlı gradyan artırma):</p>
+<br/>
+<table>
+<tr><th>Alt model</th><th>Loss</th><th>Çıktı</th></tr>
+<tr><td>Quantile P10 / P50 / P90</td><td>`quantile`</td><td>`log1p(n)` ve `log1p(frp)` üzerinde</td></tr>
+<tr><td>Ortalama</td><td>`poisson`</td><td>`n` / `frp` ortalaması</td></tr>
+</table>
+<br/>
+<p>Biome’a göre ayrı gruplar: Forest / Cropland-Stubble / Savanna-Grassland (+ yetersizse <code>all</code>).</p>
+<br/>
+<p><strong>Hipermetreler (özet):</strong> <code>max_iter=220</code>, <code>learning_rate=0.07</code>, <code>max_leaf_nodes=24</code>, <code>min_samples_leaf=40</code>, <code>l2_regularization=1.0</code>.</p>
+<br/>
+<h3>3.4 Özellikler (features)</h3>
+<p>Gruplar (<code>FEATURE_GROUPS</code>):</p>
+<br/>
+<table>
+<tr><th>Grup</th><th>Örnek özellikler</th><th>Sezgi</th></tr>
+<tr><td>Bow-tie ayak izi</td><td>`area_km2`, `scan`, `track`, `bowtie_ratio`</td><td>Kenarda piksel şişer</td></tr>
+<tr><td>Diurnal / geçiş saati</td><td>`lst_sin/cos`, `diurnal_ratio`, `night`</td><td>Gece/gündüz ve yörünge saati</td></tr>
+<tr><td>Yangın yoğunluğu</td><td>`log_frp`, `bright_t21`, `confidence`</td><td>Ne kadar “parlak/sıcak”</td></tr>
+<tr><td>Küme bağlamı</td><td>`log_cell_n`, `log_cell_frp`</td><td>Aynı H3 hücredeki komşu tespitler</td></tr>
+<tr><td>Mevsim / enlem</td><td>`doy_sin/cos`, `abs_lat`</td><td>Sezon ve coğrafya</td></tr>
+</table>
+<br/>
+<h3>3.5 Belirsizlik: Conformalized Quantile Regression (CQR)</h3>
+<p>Ham P10–P90 bandı kalibrasyon setinde <strong>CQR</strong> (Romano et al. 2019) ile genişletilir → yaklaşık <strong>%90 tahmin aralığı</strong>.  </p>
+<p>UI’daki P10/P50/P90 yangın sayısı garantisi <strong>değildir</strong> — model belirsizlik bandıdır.</p>
+<br/>
+<h3>3.6 Completeness kalibrasyonu</h3>
+<p>MODIS küçük ateşleri kaçırabilir → tespit başına tahminleri toplamak VIIRS toplamını <strong>eksik</strong> bırakır.  </p>
+<p>Biome × day/night için log-lineer düzeltme, diurnal faktörle Terra/Aqua saat kaymasına da uyarlanır.</p>
+<br/>
+<h3>3.7 Veri bölünmesi (sentetik benchmark)</h3>
+<ul>
+<li>Train ≈ 2012–2019  </li>
+<li>Calib ≈ 2020–2021  </li>
+<li>Hold-out ≈ 2022–2026  </li>
+</ul>
+<br/>
+<p><strong>Önemli:</strong> Bu benchmark <strong>fiziksel simülasyon</strong>; gerçek FIRMS ground truth değil. Gerçek arşivde ayrıca VIIRS’e karşı aylık karşılaştırma yapılır.</p>
+<br/>
+<h3>3.8 Jüriye anlatım</h3>
+<blockquote>“Tespit düzeyinde HistGradientBoosting quantile modeli kullanıyoruz. Hedef, eşleştirilmiş MODIS–VIIRS ayak izlerinden geliyor. Belirsizlik için CQR ile %90 bant üretiyoruz. Eğitim sentetik; gerçek arşivde VIIRS referansına bakıyoruz — VIIRS mutlak yer-gerçeği değil.”</blockquote>
+<br/>
+<hr/>
+<br/>
+<h2>4) Yol B — Hibrit α (aktif hücre + OLS)</h2>
+<br/>
+<p>Kod: <code>hybrid_harmonizer.py</code></p>
+<br/>
+<h3>4.1 Felsefe</h3>
+<p>Tespit saymak yerine: <strong>günde kaç H3 hücresi “aktif”?</strong>  </p>
+<p>Aynı hücrede 10 nokta olsa da o gün o hücre <strong>1</strong> sayılır → tekrar sayımı azaltır.</p>
+<br/>
+<h3>4.2 Adımlar</h3>
+<p class="num">Hijyen (Policy A + geçerli geo/FRP)  </p>
+<p class="num">Her tespiti H3-7 (veya 0.05°) hücreye yaz  </p>
+<p class="num">Günlük aktif hücre → aylık MODIS / VIIRS toplamı  </p>
+<p class="num">2012+ örtüşmede <strong>kesişimden geçen OLS:</strong>  </p>
+<p>   <div class="eq"></p>
+<p>   Y_{\text{VIIRS}} = \alpha \, X_{\text{MODIS}}</p>
+<p>   </div></p>
+<p>   (<code>LinearRegression(fit_intercept=False)</code>)  </p>
+<p class="num">Güvenlik: <code>n_months ≥ 20</code> ve <code>α ∈ [0.8, 10]</code>; değilse <strong>fallback α = 2.5</strong>  </p>
+<p class="num">Sürekli seri:  </p>
+<p>   - 2012 öncesi → <code>round(MODIS × α)</code>  </p>
+<p>   - 2012 sonrası → VIIRS hücreleri  </p>
+<br/>
+<h3>4.3 Haritada “Hibrit katmanlar”</h3>
+<ul>
+<li>Renkli grid: harmonize edilmiş hücre aktivitesi  </li>
+<li>Noktalar: gerçek VIIRS tespitleri (uydurma koordinat yok)</li>
+</ul>
+<br/>
+<h3>4.4 ML değil — ne zaman kullanılır?</h3>
+<p>Takvimde <strong>Hibrit α</strong>, haritada <strong>Hibrit katmanlar</strong>, bölgesel α + R² kartı.  </p>
+<p>Basit, yorumlanabilir, NASA Space Apps “aktif hücre + ölçek” tarzına yakın.</p>
+<br/>
+<h3>4.5 Jüriye anlatım</h3>
+<blockquote>“Hibrit yol ML değil. Bölgesel α ile aylık aktif hücreleri VIIRS ölçeğine çekiyoruz. Az veri veya saçma α gelirse 2.5’e düşüyoruz.”</blockquote>
+<br/>
+<hr/>
+<br/>
+<h2>5) Yol C — Aylık post-kalibrasyon (doğrulama motoru)</h2>
+<br/>
+<p>Kod: <code>reference_comparison.py</code>, <code>system_validation.py</code></p>
+<br/>
+<p>Gerçek Türkiye arşivinde aylık <strong>MODIS sayımı</strong> ile <strong>VIIRS referansı</strong> karşılaştırılır.  </p>
+<p>Harmonize ML çıktısı bazen şişebilir; kalibrasyon aylarında öğrenilen düzeltmeler:</p>
+<br/>
+<table>
+<tr><th>Parametre</th><th>Ne yapar?</th></tr>
+<tr><td>`platform_scale`</td><td>Ham seriyi platform sayısına göre ölçekler (NOAA-20/21 şişirmesin)</td></tr>
+<tr><td>`harm_alpha`</td><td>`α * harmonize` MAE’yi VIIRS’e göre minimize eder (grid search)</td></tr>
+<tr><td>`harm_cap_k`</td><td>Megafire şişmesini `min(harm, k * scaled)` ile keser</td></tr>
+<tr><td>`blend_w`</td><td>`w * platform_scaled + (1-w) * harm_capped` karışımı</td></tr>
+</table>
+<br/>
+<p>Hepsi <strong>sadece kalibrasyon aylarında</strong> fit edilir; test aylarında skorlanır (leakage yok).</p>
+<br/>
+<p>Örnek (Manavgat hold-out, inter-sensor): ham MAE ≈ 21.9 → harmonize blend MAE ≈ 4.9.</p>
+<br/>
+<p><strong>Jüri uyarısı:</strong> Bu <strong>inter-sensor agreement</strong>. Yanmış alan / olay doğrulaması değil.</p>
+<br/>
+<hr/>
+<br/>
+<h2>6) Yol D — Yapısal kırılma istatistiği</h2>
+<br/>
+<p>Kod: <code>stats_diagnostics.py</code></p>
+<br/>
+<h3>Pettitt (1979)</h3>
+<p>Parametrik olmayan değişim noktası. “Seride bir anda rejim değişti mi?”  </p>
+<p>p ≈ <code>2 exp(-6 K² / (n³+n²))</code>.</p>
+<br/>
+<h3>Chow (1960)</h3>
+<p><strong>Bilinen</strong> kırılma tarihinde (2012-01-20) log-ölçekte doğrusal trend kırılması F-testi.</p>
+<br/>
+<h3>Adım %</h3>
+<p>Kırılma öncesi/sonrası 5 yıllık ortalama farkı — <strong>etki büyüklüğü</strong>.</p>
+<br/>
+<h3>Kritik uyarı (ezberle)</h3>
+<p>Aylık yangın serileri <strong>otokorelasyonlu</strong>. p-değerler anti-konservatif olabilir.  </p>
+<p><strong>p&amp;lt;0.05 = kesin kırılma değil.</strong> p + adım % + ham vs harmonize birlikte okunur.</p>
+<br/>
+<hr/>
+<br/>
+<h2>7) Yanma takvimi &amp; anomali</h2>
+<br/>
+<p>Kod: <code>burning_calendar.py</code> (+ hibrit/harmonize/ham seri seçimi)</p>
+<br/>
+<ul>
+<li>Yıl × gün-of-year veya ay × yıl ısı haritası  </li>
+<li>Seçilen ay vs çok yıllı <strong>medyan</strong> → anomali %  </li>
+<li>P10–P90 climatology bandı = belirsizlik / dağılım, yangın garantisi değil  </li>
+</ul>
+<br/>
+<hr/>
+<br/>
+<h2>8) Platform / sensör takvimi</h2>
+<br/>
+<p>Kod: <code>sensors.py</code></p>
+<br/>
+<ul>
+<li>VIIRS SNPP ~2012  </li>
+<li>NOAA-20, NOAA-21 eklenince ham toplam artabilir  </li>
+<li><code>n_operating</code> ile <strong>platform normalizasyonu</strong> — yeni uydu = yapay adım olmasın  </li>
+</ul>
+<br/>
+<p>SNPP canlı NRT 2026-11-02’de bitti; canlıda NOAA-20/21.</p>
+<br/>
+<hr/>
+<br/>
+<h2>9) Hangi metrik ne demek?</h2>
+<br/>
+<table>
+<tr><th>Metrik</th><th>Anlam</th></tr>
+<tr><td>**MAE**</td><td>Ortalama mutlak hata (aylık sayım vs VIIRS referansı)</td></tr>
+<tr><td>**RMSE**</td><td>Büyük hataları daha çok cezalandırır</td></tr>
+<tr><td>**R² (hibrit α)**</td><td>`Y=αX` doğrusal uyum kalitesi (aktif hücre)</td></tr>
+<tr><td>**Bias %**</td><td>Sistematik fazla/eksik sayma</td></tr>
+<tr><td>**Hold-out**</td><td>Fit edilmeyen sonraki aylar</td></tr>
+<tr><td>**Pinball loss**</td><td>Quantile tahmin kalitesi</td></tr>
+</table>
+<br/>
+<hr/>
+<br/>
+<h2>10) Sık sorular — hazır cevaplar</h2>
+<br/>
+<p><strong>“Hangi ML’i kullanıyorsunuz?”</strong>  </p>
+<p>HistGradientBoosting quantile + Poisson (scikit-learn). Biome-stratified. Hedef: matched-footprint <code>n_eq</code> / <code>frp_eq</code>.</p>
+<br/>
+<p><strong>“Deep learning / neural net var mı?”</strong>  </p>
+<p>Ana harmonizer’da yok. (Brifing için isteğe bağlı LLM metin katmanı ayrı konu.)</p>
+<br/>
+<p><strong>“Hibrit α ML mi?”</strong>  </p>
+<p>Hayır. OLS üzerinden bölgesel ölçek.</p>
+<br/>
+<p><strong>“Neden iki yol?”</strong>  </p>
+<p>ML tespit düzeyinde zengin; hibrit α sade ve yorumlanabilir. UI ikisini de gösterir; “her zaman ML kazanır” demiyoruz.</p>
+<br/>
+<p><strong>“Overfit riski?”</strong>  </p>
+<p>Zaman bloklu train/calib/test; CQR ayrı calib; gerçek arşivde ayrı referans; coğrafi genelleme henüz iddia edilmiyor.</p>
+<br/>
+<p><strong>“Ground truth?”</strong>  </p>
+<p>Sentetikte simülasyon gerçeği var. Gerçekte VIIRS <strong>referans</strong>. Olay/perimeter doğrulama = gelecek iş.</p>
+<br/>
+<p><strong>“α = 1.21 ne demek?”</strong>  </p>
+<p>O ROI’de aylık MODIS aktif hücre × 1.21 ≈ VIIRS aktif hücre (örtüşme döneminde).</p>
+<br/>
+<hr/>
+<br/>
+<h2>11) Öğrenme yolu (arkadaş için checklist)</h2>
+<br/>
+<p class="num">README’deki “Method (short)” + limitations  </p>
+<p class="num">Bu rehber §0–§4  </p>
+<p class="num">Kod: <code>harmonizer_ml.py</code> docstring + <code>FEATURES</code>  </p>
+<p class="num">Kod: <code>hybrid_harmonizer.py</code> <code>fit_alpha</code> + <code>build_harmonized_monthly</code>  </p>
+<p class="num">UI’da Manavgat: Model sekmesi + Hibrit katman + Kırılma  </p>
+<p class="num"><code>system_validation.json</code> özet MAE’leri oku  </p>
+<p class="num">Birine 2 dakikada anlat (kayıt tutmadan)</p>
+<br/>
+<hr/>
+<br/>
+<h2>12) Dosya haritası</h2>
+<br/>
+<pre>
+backend/src/engine/
+  harmonizer_ml.py      ← ML quantile harmonizer
+  hybrid_harmonizer.py  ← aktif hücre + α
+  geometry_h3.py        ← H3, ayak izi eşleştirme
+  confidence_policies.py
+  stats_diagnostics.py  ← Pettitt / Chow
+  diurnal_normalizer.py
+  prepare.py / pipeline.py / service.py
+
+backend/src/analytics/
+  reference_comparison.py  ← aylık post-cal
+  system_validation.py
+  burning_calendar.py
+  confidence_sensitivity.py
+</pre>
+<br/>
+<hr/>
+<br/>
+<p>*Alaz / AETHER-FIRE · NASA Space Apps 2026 · bağımsız araştırma prototipi*</p>
+</body></html>

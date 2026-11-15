@@ -315,6 +315,11 @@ export function AetherPage() {
           // Harita bir sonraki boyamada hazır olsun
           queueMicrotask(() => mapRef.current?.setRoiPolygon(pts, { fit: true }));
         }}
+        onFocusRoi={(pts) => {
+          goTab("map");
+          setTarget({ kind: "roi" });
+          queueMicrotask(() => mapRef.current?.setRoiPolygon(pts, { fit: true }));
+        }}
         onExportCsv={() => void exportHotspotsCsv()}
       />
       <div className={styles.main}>
@@ -358,7 +363,13 @@ export function AetherPage() {
             hasSelection={inspector.kind !== "empty"}
             onClose={() => (target?.kind === "roi" ? clearRoi() : setTarget(null))}
             onHexClick={(id) => setTarget({ kind: "hex", id })}
-            onRoi={(pts) => { setRoi(pts); setDrawing(false); setTarget({ kind: "roi" }); }}
+            onRoi={(pts) => {
+              setRoi(pts);
+              setDrawing(false);
+              setTarget({ kind: "roi" });
+              // finishRoi already fits; ensure camera if map was mid-transition
+              queueMicrotask(() => mapRef.current?.setRoiPolygon(pts, { fit: true }));
+            }}
             onDrawing={setDrawing}
             onBasemap={setBasemapOk}
             onDrawRoi={startDraw}

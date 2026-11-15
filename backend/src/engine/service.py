@@ -25,6 +25,7 @@ from src.engine.diurnal_normalizer import (
     nominal_day_lst,
 )
 from src.engine.harmonizer_ml import MODEL_PATH, HarmonizerModel, add_cell_context
+from src.engine.hybrid_harmonizer import DEFAULT_FALLBACK_ALPHA, monthly_to_csv, run_hybrid
 from src.engine.prepare import prepare
 from src.engine.sensors import TIMELINE_MARKERS, VIIRS_START, n_operating
 from src.engine.static_filter import KNOWN_SOURCES, tag_static
@@ -1153,8 +1154,30 @@ class AetherState:
         ey = max(sy, min(ey, data_ey))
         ty = int(target_year) if target_year is not None else ey
         ty = max(sy, min(ty, ey))
-        col = "harmonized" if series == "harmonized" else "raw_all"
-        series_daily = daily[col].astype(float)
+        pack = None
+        hybrid_meta = None
+        if series == "hybrid":
+            pack = run_hybrid(df, grid="h3", fallback_alpha=DEFAULT_FALLBACK_ALPHA)
+            if pack.get("empty"):
+                return clean({
+                    "empty": True, "meta": meta, "message": pack.get("message") or "Hybrid boş.",
+                    "hybrid": pack,
+                })
+            dh = pack["daily_harmonized"]
+            series_daily = pd.Series(
+                dh["values"],
+                index=pd.to_datetime(dh["labels"]),
+                dtype=float,
+            )
+            hybrid_meta = {
+                "alpha": pack.get("alpha"),
+                "hygiene": pack.get("hygiene"),
+                "note": pack.get("note"),
+            }
+        else:
+            col = "harmonized" if series == "harmonized" else "raw_all"
+            series_daily = daily[col].astype(float)
+
         # Görüntülenen aralık dışı yılları kes (takvim matrisi daralsın)
         series_daily = series_daily[
             (series_daily.index.year >= sy) & (series_daily.index.year <= ey)
@@ -1162,20 +1185,21 @@ class AetherState:
         cal = build_calendar(series_daily, target_year=ty, start_year=sy)
         cal["region"] = "archive:tr"
         cal["series"] = series
+        month_cmp = current_month_vs_median(series_daily.astype(float), year=ty, month=month)
         return clean({
             "empty": False,
             "meta": {
                 **meta,
                 "view_years": [sy, ey],
                 "target_year": ty,
+                **({"hybrid": hybrid_meta} if hybrid_meta else {}),
             },
             "calendar": cal,
-            "month_year": month_year_matrix(series_daily, start_year=sy, end_year=ty),
-            "current_month_vs_median": current_month_vs_median(
-                daily[col].astype(float), year=ty, month=month,
-            ),
+            "month_year": month_year_matrix(series_daily, start_year=sy, end_year=ey),
+            "current_month_vs_median": month_cmp,
             "local_validation": self._area_local_validation(daily, meta, df=df),
             "series": series,
+            "hybrid": pack if series == "hybrid" else None,
         })
 
     def area_series(
@@ -1432,6 +1456,107 @@ class AetherState:
             },
         })
 
+    def area_hybrid(
+        self,
+        *,
+        polygon: list[list[float]] | None = None,
+        bbox: list[float] | None = None,
+        grid: str = "h3",
+        fallback_alpha: float = DEFAULT_FALLBACK_ALPHA,
+        force: bool = False,
+        map_recent_days: int | None = None,
+        map_years: int | None = None,
+        map_start: str | None = None,
+        map_end: str | None = None,
+    ) -> dict:
+        """Active-cell grid + dynamic α (Y=αX) hybrid harmonization for a ROI."""
+        g = (grid or "h3").lower()
+        if g not in ("h3", "deg005"):
+            raise ValueError("grid must be h3 | deg005")
+        df, _, meta = self._load_area(
+            polygon=polygon, bbox=bbox, force=force, history_years=REMOTE_DEFAULT_YEARS,
+        )
+        if df.empty:
+            return clean({
+                "empty": True,
+                "meta": meta,
+                "message": meta.get("note") or "Seçilen alanda tespit yok.",
+                "alpha": {
+                    "value": float(fallback_alpha),
+                    "fallback_used": True,
+                    "fallback_reason": "no_detections",
+                    "n_months": 0,
+                },
+                "monthly": [],
+                "map": {"harmonized_cells": [], "viirs_points": []},
+            })
+        days = map_recent_days
+        if map_start is None and map_end is None:
+            if days is None and map_years is not None:
+                days = max(30, int(map_years) * 365)
+            if days is None:
+                days = 5 * 365  # default map window: last 5 years
+        pack = run_hybrid(
+            df,
+            grid=g,  # type: ignore[arg-type]
+            fallback_alpha=float(fallback_alpha),
+            map_recent_days=days,
+            map_start=map_start,
+            map_end=map_end,
+        )
+        # Latest-month anomaly card
+        anomaly = None
+        rows = pack.get("monthly") or []
+        if rows:
+            last = rows[-1]
+            anomaly = {
+                "year": last.get("year"),
+                "month": last.get("month"),
+                "harmonized_activity": last.get("harmonized_activity"),
+                "historical_median": last.get("historical_median"),
+                "anomaly_pct": last.get("anomaly_pct"),
+            }
+        return clean({
+            **pack,
+            "meta": meta,
+            "anomaly_card": anomaly,
+            "fallback_badge": bool((pack.get("alpha") or {}).get("fallback_used")),
+            "fallback_message_tr": (
+                "Seçilen alanda yeterli ortak tarihsel veri (minimum 20) bulunmadığı "
+                "için bölgesel referans katsayısı uygulandı"
+                if (pack.get("alpha") or {}).get("fallback_used")
+                else None
+            ),
+            "fallback_message_en": (
+                "Fewer than 20 overlapping calibration months (or α out of bounds); "
+                "applied regional fallback coefficient."
+                if (pack.get("alpha") or {}).get("fallback_used")
+                else None
+            ),
+        })
+
+    def export_hybrid_csv(
+        self,
+        *,
+        polygon: list[list[float]] | None = None,
+        bbox: list[float] | None = None,
+        grid: str = "h3",
+        fallback_alpha: float = DEFAULT_FALLBACK_ALPHA,
+        force: bool = False,
+    ) -> tuple[str, dict]:
+        pack = self.area_hybrid(
+            polygon=polygon, bbox=bbox, grid=grid,
+            fallback_alpha=fallback_alpha, force=force,
+        )
+        text = monthly_to_csv(pack.get("monthly") or [])
+        info = {
+            "n": len(pack.get("monthly") or []),
+            "alpha": (pack.get("alpha") or {}).get("value"),
+            "fallback_used": (pack.get("alpha") or {}).get("fallback_used"),
+            "empty": pack.get("empty"),
+        }
+        return text, info
+
     @staticmethod
     def _density_legend(
         n_max: int,
@@ -1580,12 +1705,17 @@ class AetherState:
         section: str = "overview",
         question: str | None = None,
         lang: str = "tr",
+        series: str = "raw",
+        start_year: int | None = None,
+        end_year: int | None = None,
+        target_year: int | None = None,
     ) -> dict:
         """ROI için bölüm bazlı dayanak üretir ve DeepSeek ile dil-uyumlu yorum döner."""
         from src.analytics import deepseek_client as ds
 
         sec = (section or "overview").strip()[:64]
         en = (lang or "tr").strip().lower() == "en"
+        cal_series = series if series in ("harmonized", "raw", "hybrid") else "raw"
         if not polygon or len(polygon) < 3:
             return clean({"available": ds.configured(), "empty": True, "message": "Poligon gerekli (≥ 3 köşe)."})
 
@@ -1613,7 +1743,17 @@ class AetherState:
             })
 
         try:
-            cal = self.area_calendar(polygon=polygon, series="raw") if need_cal else {"empty": True}
+            cal = (
+                self.area_calendar(
+                    polygon=polygon,
+                    series=cal_series,
+                    start_year=start_year,
+                    end_year=end_year,
+                    target_year=target_year,
+                )
+                if need_cal
+                else {"empty": True}
+            )
         except ValueError as exc:
             return clean({"available": ds.configured(), "empty": True, "message": str(exc)})
         if focus in ("calendar", "briefing") and cal.get("empty") and not need_break:
@@ -1646,18 +1786,27 @@ class AetherState:
                 area_df = None
                 intensity = intensity or {}
 
+        view_years = meta.get("view_years")
+        if not view_years and start_year is not None and end_year is not None:
+            view_years = [int(start_year), int(end_year)]
+        viirs_year = int(pd.Timestamp(str(VIIRS_START)).year)
         base_meta = {
             "bolum": sec,
             "sekme": focus,
             "alan_km2": meta.get("area_km2"),
-            "tespit_sayisi": meta.get("raw_count"),
-            "modis_tespit": (meta.get("counts") or {}).get("raw_modis"),
-            "viirs_tespit": (meta.get("counts") or {}).get("raw_viirs"),
-            "tarih": meta.get("date_range"),
-            "siddet_frp": intensity or None,
+            "tespit_sayisi_roi_arsiv": meta.get("raw_count"),
+            "modis_tespit_roi_arsiv": (meta.get("counts") or {}).get("raw_modis"),
+            "viirs_tespit_roi_arsiv": (meta.get("counts") or {}).get("raw_viirs"),
+            "roi_arsiv_tarih": meta.get("date_range"),
+            "gorunen_tablo_yillar": view_years,
+            "seri": cal.get("series") or cal_series,
+            "siddet_frp_roi_arsiv": intensity or None,
+            "viirs_baslangic": str(VIIRS_START),
             "birim": (
-                "tespit_sayisi = FIRMS sıcak nokta (yangın tespit) adedi; "
-                "frp_* = radyatif güç MW (şiddet göstergesi)."
+                "tespit = FIRMS sıcak nokta adedi (yangın sayısı değil); "
+                "frp_* = radyatif güç MW. "
+                "gorunen_tablo_yillar = ekrandaki tablo/ısı haritası yılı; "
+                "roi_arsiv_tarih = tüm ROI arşivi (tablo aralığı değildir)."
             ),
         }
 
@@ -1725,20 +1874,51 @@ class AetherState:
                 "p90": vs.get("historical_p90"),
             }
         elif sec in ("heatmap", "month_year"):
-            years = my.get("years") or cal_body.get("years") or []
+            years = list(my.get("years") or cal_body.get("years") or [])
             totals = cal_body.get("annual_totals") or []
             peaks = cal_body.get("peak_doy") or []
-            pairs = [
-                {"yil": y, "yillik_toplam": totals[i] if i < len(totals) else None,
-                 "tepe_gun": peaks[i] if i < len(peaks) else None}
-                for i, y in enumerate(years[-8:])
-            ]
+            # Align annual totals with view years when calendar years match
+            cal_years = list(cal_body.get("years") or [])
+            annual_pairs = []
+            for i, y in enumerate(years):
+                ti = cal_years.index(y) if y in cal_years else None
+                yillik = totals[ti] if ti is not None and ti < len(totals) else None
+                if yillik is None and my.get("matrix") and i < len(my["matrix"]):
+                    vals = [float(v) for v in (my["matrix"][i] or []) if v is not None]
+                    yillik = round(sum(vals), 2) if vals else None
+                annual_pairs.append({
+                    "yil": y,
+                    "yillik_toplam": yillik,
+                    "tepe_gun": peaks[ti] if ti is not None and ti < len(peaks) else None,
+                })
+            y0 = int(years[0]) if years else (view_years[0] if view_years else None)
+            y1 = int(years[-1]) if years else (view_years[1] if view_years else None)
+            pre_viirs_only = y1 is not None and y1 < viirs_year
+            spans_transition = (
+                y0 is not None and y1 is not None and y0 < viirs_year <= y1
+            )
+            sensor_note = (
+                f"Bu görünüm {y0}–{y1}: VIIRS ({VIIRS_START}) öncesi — tabloda yalnızca MODIS dönemi aktivitesi "
+                f"(hibritte MODIS×α VIIRS-eşdeğer ölçek; hamda MODIS sayımı)."
+                if pre_viirs_only else
+                f"Bu görünüm {y0}–{y1}: VIIRS {VIIRS_START} sonrası ile örtüşüyor; "
+                f"2012 öncesi hücreler MODIS dönemi, sonrası VIIRS/hibrit karışık olabilir."
+                if spans_transition else
+                f"Bu görünüm {y0}–{y1}: VIIRS dönemi (MODIS de devam eder; sensör payı ayrı sayılmaz)."
+            )
             used = {
                 **base_meta,
-                "tablo": "yil_yogunluk_ozeti",
-                "seri": cal.get("series") or cal_body.get("series") or "raw",
-                "son_yillar": pairs,
-                "not": "Tam ay×yıl matrisi gönderilmedi; yıllık özet.",
+                "tablo": "ay_x_yil_yogunluk" if sec == "month_year" else "yil_x_gun_isi_haritasi",
+                "gorunen_tablo_yillar": [y0, y1],
+                "yillar": years,
+                "aylar": my.get("months") or list(range(1, 13)),
+                "matris_ay_x_yil": my.get("matrix") if sec == "month_year" else None,
+                "yillik_ozet": annual_pairs,
+                "sensor_baglam": sensor_note,
+                "onemli": (
+                    "Kullanıcı sorusu bu GÖRÜNEN tablo içindir. "
+                    "Cevapta gorunen_tablo_yillar kullan; roi_arsiv_tarih'i tablo aralığı sanma."
+                ),
             }
         elif sec == "envelope":
             from src.analytics.burning_calendar import envelope_ai_summary

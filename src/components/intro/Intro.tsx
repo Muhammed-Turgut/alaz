@@ -8,7 +8,7 @@ import styles from "./Intro.module.css";
 const LEAVE_MS = 1300;          // Intro.module.css içindeki .leaving süresiyle aynı olmalı
 const SAFETY_MS = 14000;        // video oynamaz ya da bitmezse giriş ekranda takılı kalmasın
 const NO_VIDEO_HOLD_MS = 4500;  // video açılamazsa logo siyah zeminde bu kadar durur
-const SEEN_KEY = "alaz-intro-seen";
+const SEEN_KEY = "alaz-intro-seen-v2";
 
 type Phase = "playing" | "leaving" | "done";
 
@@ -86,8 +86,11 @@ export function Intro() {
           onError={() => { holdTimer.current = window.setTimeout(finish, NO_VIDEO_HOLD_MS); }}
         />
         <div className={styles.scrim} />
-        <img src={logo} alt={siteConfig.name} className={styles.logo} />
-        <p className={styles.skipHint}>Devam etmek için tıkla veya Esc</p>
+        <div className={styles.brand}>
+          <img src={logo} alt={siteConfig.name} className={styles.logo} />
+          <p className={styles.systemName}>Sistem başlatılıyor…</p>
+        </div>
+        <p className={styles.skipHint}>Geçmek için Esc&apos;ye basın</p>
       </div>
     </div>
   );

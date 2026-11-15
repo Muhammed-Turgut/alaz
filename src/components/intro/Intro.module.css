@@ -31,25 +31,54 @@
   background: var(--intro-scrim);
 }
 
+.brand {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.7rem;
+  animation: rise 2.2s cubic-bezier(0.33, 1, 0.68, 1) 0.6s both;
+}
+
+.logo {
+  width: min(186px, 24vw); /* önceki ~560px / 3 */
+  height: auto;
+}
+
+.systemName {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: clamp(0.95rem, 2vw, 1.25rem);
+  letter-spacing: 0.1em;
+  color: rgba(255, 255, 255, 0.78);
+  pointer-events: none;
+}
+
 .skipHint {
   position: absolute;
-  bottom: 8%;
+  bottom: 4.5%;
   left: 50%;
   z-index: 1;
   transform: translateX(-50%);
   margin: 0;
-  font-size: 13px;
-  letter-spacing: 0.04em;
-  color: rgba(255, 255, 255, 0.72);
+  font-family: var(--font-display);
+  font-size: clamp(0.85rem, 1.6vw, 1.05rem);
+  letter-spacing: 0.08em;
+  color: rgba(255, 255, 255, 0.55);
   pointer-events: none;
   white-space: nowrap;
+  animation: hintPulse 2.8s ease-in-out 1.4s infinite;
 }
 
-.logo {
-  position: relative;
-  width: min(560px, 72vw);
-  height: auto;
-  animation: rise 2.2s cubic-bezier(0.33, 1, 0.68, 1) 0.6s both;
+@keyframes hintPulse {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 0.72;
+  }
 }
 
 /* Logo ekranın altından gelir, ortada durur */
@@ -89,8 +118,13 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .logo {
+  .brand {
     animation: appear 0.6s ease 0.3s both;
+  }
+
+  .skipHint {
+    animation: none;
+    opacity: 0.55;
   }
 
   .leaving {

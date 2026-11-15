@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Alaz — Giriş</title>
+  <style>
+    @font-face {
+      font-family: "New Amsterdam";
+      src: url("./assets/NewAmsterdam-Regular.ttf") format("truetype");
+      font-weight: 400;
+      font-style: normal;
+      font-display: swap;
+    }
+    :root {
+      --black: #000;
+      --blue: #0b60b0;
+      --sky: #40a2d8;
+      --cream: #f0edcf;
+      --white: #fff9f2;
+      --muted: #55606b;
+      --border: #e7e2dc;
+      --subtle: #f0f0f0;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      height: 100%;
+      background: #000;
+      color: #000;
+      font-family: "Segoe UI", Helvetica, Arial, sans-serif;
+      overflow: hidden;
+    }
+    .deck { height: 100%; width: 100%; position: relative; }
+    .slide {
+      display: none;
+      height: 100%; width: 100%;
+      padding: clamp(1.6rem, 4vw, 3.2rem);
+      background: var(--white);
+      position: absolute; inset: 0;
+      overflow: hidden;
+    }
+    .slide.active { display: grid; }
+    .slide.dark { background: #000; color: var(--cream); }
+    .slide.dark .muted { color: #a8b0b8; }
+
+    h1, h2, h3 {
+      font-family: "New Amsterdam", "Segoe UI", sans-serif;
+      font-weight: 400;
+      line-height: 1.12;
+    }
+    h1 { font-size: clamp(2.4rem, 5vw, 4rem); }
+    h2 { font-size: clamp(1.65rem, 3.2vw, 2.45rem); }
+    h3 { font-size: clamp(1.15rem, 2vw, 1.4rem); color: var(--blue); }
+
+    p, li { font-size: clamp(1.05rem, 1.5vw, 1.25rem); line-height: 1.45; }
+    .muted { color: var(--muted); }
+    .kicker {
+      font-size: 0.82rem; letter-spacing: 0.14em; text-transform: uppercase;
+      color: var(--blue); font-weight: 700;
+    }
+    .slide.dark .kicker { color: var(--sky); }
+
+    .hero {
+      display: flex; flex-direction: column; justify-content: center;
+      height: 100%; gap: 1.1rem;
+    }
+    .stack {
+      display: flex; flex-direction: column; justify-content: center;
+      height: 100%; gap: 0.95rem;
+    }
+    .logo-mark {
+      width: min(280px, 48vw);
+      height: auto;
+      display: block;
+    }
+    .team-banner {
+      width: min(720px, 88%);
+      height: auto;
+      display: block;
+      margin-top: 0.55rem;
+    }
+
+    ul.clean { list-style: none; display: flex; flex-direction: column; gap: 0.7rem; }
+    ul.clean li { padding-left: 1rem; border-left: 3px solid var(--blue); }
+
+    .team {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 0.55rem 0.9rem;
+      margin-top: 0.55rem;
+      max-width: 44rem;
+    }
+    .member {
+      background: #111;
+      border: 1px solid #333;
+      padding: 0.7rem 0.85rem;
+    }
+    .member strong {
+      display: block;
+      font-size: clamp(0.92rem, 1.2vw, 1.08rem);
+      color: #f0edcf;
+      line-height: 1.25;
+    }
+    .member span { font-size: 0.85rem; color: #a8b0b8; }
+
+    .three {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 0.85rem;
+    }
+    .card {
+      background: var(--subtle);
+      border: 1px solid var(--border);
+      padding: 0.9rem 1rem 1.05rem;
+      min-height: 0;
+      overflow: visible;
+    }
+    .card .n {
+      font-family: "New Amsterdam", sans-serif;
+      font-size: 1.55rem; color: var(--blue); line-height: 1; margin-bottom: 0.35rem;
+    }
+    .card h3 { margin: 0.15rem 0 0.35rem; }
+    .card p { font-size: 0.92rem; color: var(--muted); line-height: 1.4; }
+
+    .chip {
+      display: inline-flex; padding: 0.3rem 0.7rem;
+      border: 1px solid var(--border); background: var(--subtle); font-size: 0.82rem;
+    }
+    .chip.sky { background: var(--sky); border-color: var(--sky); color: #000; }
+
+    .footer-note {
+      position: absolute;
+      left: clamp(1.6rem, 4vw, 3.2rem);
+      right: clamp(1.6rem, 4vw, 3.2rem);
+      bottom: 1rem;
+      display: flex; justify-content: space-between;
+      font-size: 0.78rem; color: var(--muted); pointer-events: none;
+    }
+    .slide.dark .footer-note { color: #7a848e; }
+
+    .progress { position: fixed; left:0; right:0; top:0; height:3px; background:#222; z-index:20; }
+    .progress > span { display:block; height:100%; background:var(--sky); width:0; }
+
+    @media (max-width: 900px) {
+      .team { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .three { grid-template-columns: 1fr; }
+      .team-banner { width: min(640px, 100%); }
+    }
+
+    @media print {
+      @page { size: 338mm 190mm; margin: 0; }
+      html, body {
+        height: auto !important; overflow: visible !important;
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
+      }
+      .progress { display: none !important; }
+      .deck { height: auto !important; position: static !important; }
+      .slide {
+        display: grid !important;
+        position: relative !important;
+        inset: auto !important;
+        width: 338mm !important;
+        height: 190mm !important;
+        padding: 12mm 14mm 16mm !important;
+        overflow: hidden !important;
+        page-break-after: always;
+        break-after: page;
+      }
+      .slide:last-child { page-break-after: auto; }
+      .slide.dark { background: #000 !important; color: #f0edcf !important; }
+      .three {
+        grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+        gap: 0.7rem !important;
+      }
+      .team-banner {
+        width: min(620px, 70%) !important;
+        max-height: 78mm !important;
+        object-fit: contain !important;
+        object-position: left center !important;
+      }
+      .logo-mark { width: min(240px, 42%) !important; }
+      h2 { font-size: 2.1rem !important; }
+      p, li { font-size: 1.05rem !important; }
+      .card p { font-size: 0.92rem !important; }
+      .stack { gap: 0.75rem !important; }
+      .footer-note {
+        position: absolute !important;
+        left: 14mm !important; right: 14mm !important; bottom: 7mm !important;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="progress"><span id="bar"></span></div>
+  <div class="deck" id="deck">
+
+    <!-- 1 KAPAK + TAKIM -->
+    <section class="slide dark active" data-title="Takım">
+      <div class="hero">
+        <img class="logo-mark" src="./assets/logo.png" alt="Alaz" />
+        <p class="kicker">NASA Space Apps Challenge 2026</p>
+        <p class="muted" style="max-width:40rem">
+          MODIS ve VIIRS sıcak nokta verisini adil ve anlaşılır okuyan araştırma prototipi
+        </p>
+        <img class="team-banner" src="./assets/team-banner-onblack.png" alt="Takım: Muhammed Turgut, Muhammed Emirhan Çiftsüren, Mehmet Ali Guda, Mehmet Buğra Levent" />
+      </div>
+      <div class="footer-note"><span>Alaz</span><span></span></div>
+    </section>
+
+    <!-- 2 NEDEN BU CHALLENGE -->
+    <section class="slide" data-title="Neden">
+      <div class="stack">
+        <p class="kicker">Seçim</p>
+        <h2>Neden bu NASA alanını seçtik?</h2>
+        <ul class="clean">
+          <li>NASA yıllardır uydudan yangın / sıcak nokta verisi üretiyor — veri var, dil birliği yok.</li>
+          <li>Challenge net: eski ve yeni kayıtları <strong>birleştir</strong>, bölge seçip <strong>göster</strong>, dönemleri <strong>karşılaştır</strong>.</li>
+          <li>Biz tahmin yarışması değil, <strong>doğru okuma</strong> problemini seçtik: panik değil, netlik.</li>
+        </ul>
+        <p class="muted">Challenge: Harmonization of MODIS and VIIRS Hot Spots</p>
+      </div>
+      <div class="footer-note"><span>Alaz</span><span></span></div>
+    </section>
+
+    <!-- 3 ÖNEM (kokutmadan) -->
+    <section class="slide" data-title="Önem">
+      <div class="stack" style="justify-content:flex-start;gap:0.85rem">
+        <div>
+          <p class="kicker">Bağlam</p>
+          <h2>Bu neden önemli?</h2>
+        </div>
+        <div class="three">
+          <div class="card">
+            <div class="n">Dünya</div>
+            <p>Avrupa, Amerika, Avustralya’da büyük yangınlar sık gündemde. Soru çoğu zaman aynı: “Bu dönem her zamanki gibi mi?”</p>
+          </div>
+          <div class="card">
+            <div class="n">Türkiye</div>
+            <p>Akdeniz kuşağında yaz riski kritik. Manavgat gibi bölgelerde geçmişi adil okumak planlama için değerli.</p>
+          </div>
+          <div class="card">
+            <div class="n">Risk</div>
+            <p>Kamera değişince ham sayılar fırlar. Bu her zaman daha çok yangın demek değildir — yanlış okuma yanlış öncelik doğurur.</p>
+          </div>
+        </div>
+        <p style="font-family:'New Amsterdam',sans-serif;font-size:clamp(1.25rem,2.4vw,1.75rem);color:var(--blue);max-width:44rem">
+          Amacımız korkutmak değil — geçmişi adil karşılaştırıp sağlam zemin vermek.
+        </p>
+      </div>
+      <div class="footer-note"><span>Alaz</span><span></span></div>
+    </section>
+
+    <!-- 4 NASIL / KÖPRÜ -->
+    <section class="slide" data-title="Köprü">
+      <div class="stack">
+        <p class="kicker">Şimdi</p>
+        <h2>Alaz ne yapıyor? — kısaca</h2>
+        <div class="three">
+          <div class="card">
+            <div class="n">1</div>
+            <h3>Birleştir</h3>
+            <p>MODIS + VIIRS kayıtlarını ortak bir okuma diline yaklaştırır.</p>
+          </div>
+          <div class="card">
+            <div class="n">2</div>
+            <h3>Göster</h3>
+            <p>Haritada bölge seçip aktiviteyi görünür kılar.</p>
+          </div>
+          <div class="card">
+            <div class="n">3</div>
+            <h3>Karşılaştır</h3>
+            <p>“Bu dönem her zamankinden mi yoğun?” sorusuna bakış sunar.</p>
+          </div>
+        </div>
+        <p class="muted">Sıcak nokta ≠ yangın sayısı. Müdahale emri değil — analiz / ön bakış. Sonraki slaytlarda detay.</p>
+      </div>
+      <div class="footer-note"><span>Alaz</span><span></span></div>
+    </section>
+
+  </div>
+  <script>
+    const slides = [...document.querySelectorAll(".slide")];
+    const bar = document.getElementById("bar");
+    let i = 0;
+    function show(n) {
+      i = Math.max(0, Math.min(slides.length - 1, n));
+      slides.forEach((s, idx) => s.classList.toggle("active", idx === i));
+      bar.style.width = ((i + 1) / slides.length * 100) + "%";
+      slides.forEach((s, idx) => {
+        const foot = s.querySelector(".footer-note span:last-child");
+        if (foot) foot.textContent = (idx + 1) + " / " + slides.length;
+      });
+    }
+    window.addEventListener("keydown", (e) => {
+      if (["ArrowRight"," ","Enter","PageDown"].includes(e.key)) { e.preventDefault(); show(i+1); }
+      if (["ArrowLeft","Backspace","PageUp"].includes(e.key)) { e.preventDefault(); show(i-1); }
+    });
+    show(0);
+  </script>
+</body>
+</html>

@@ -114,11 +114,27 @@ class AreaScopeRequest(BaseModel):
 
 
 class AreaCalendarRequest(AreaScopeRequest):
-    series: Literal["harmonized", "raw"] = "harmonized"
+    series: Literal["harmonized", "raw", "hybrid"] = "harmonized"
     target_year: Optional[int] = Field(None, ge=2000, le=2100)
     start_year: Optional[int] = Field(None, ge=2000, le=2100)
     end_year: Optional[int] = Field(None, ge=2000, le=2100)
     month: Optional[int] = Field(None, ge=1, le=12)
+
+
+class AreaHybridRequest(AreaScopeRequest):
+    """Active-cell grid + dynamic regional α (NASA Space Apps hybrid engine)."""
+    grid: Literal["h3", "deg005"] = "h3"
+    fallback_alpha: float = Field(2.5, gt=0, le=50)
+    map_recent_days: Optional[int] = Field(
+        None, ge=30, le=10000,
+        description="Map overlay lookback days from latest detection (ignored if map_start/map_end set).",
+    )
+    map_years: Optional[int] = Field(
+        None, ge=1, le=25,
+        description="Convenience: map overlay = last N years (sets map_recent_days ≈ N*365).",
+    )
+    map_start: Optional[str] = Field(None, description="YYYY-MM-DD inclusive map window start")
+    map_end: Optional[str] = Field(None, description="YYYY-MM-DD inclusive map window end")
 
 
 class AreaSeriesRequest(AreaScopeRequest):
@@ -143,6 +159,11 @@ class InterpretRequest(AreaScopeRequest):
     section: str = Field("overview", max_length=64, description="Tablo/kart kimliği")
     question: Optional[str] = Field(None, max_length=500)
     lang: Literal["tr", "en"] = "tr"
+    # Calendar UI görünümü — AI dayanağı ekrandaki tablo ile aynı olmalı
+    series: Literal["harmonized", "raw", "hybrid"] = "raw"
+    start_year: Optional[int] = Field(None, ge=2000, le=2100)
+    end_year: Optional[int] = Field(None, ge=2000, le=2100)
+    target_year: Optional[int] = Field(None, ge=2000, le=2100)
 
 
 class HealthResponse(BaseModel):

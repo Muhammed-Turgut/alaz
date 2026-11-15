@@ -205,16 +205,70 @@ export interface MonthVsMedian {
   month_total?: number;
   historical_median?: number | null;
   ratio?: number | null;
+  anomaly_pct?: number | null;
   percentile?: number | null;
   n_years?: number;
   historical_p10?: number;
   historical_p90?: number;
 }
 
+export interface HybridAlphaInfo {
+  value: number;
+  r2?: number | null;
+  n_months: number;
+  fallback_used: boolean;
+  fallback_reason?: string | null;
+  bounds?: [number, number];
+  fallback_alpha?: number;
+  fitted_alpha?: number;
+  calib_window?: [string, string];
+}
+
+export interface HybridMonthlyRow {
+  year: number;
+  month: number;
+  raw_modis: number;
+  raw_viirs: number;
+  applied_alpha: number;
+  harmonized_activity: number;
+  historical_median: number | null;
+  anomaly_pct: number | null;
+}
+
+export interface AreaHybridResult {
+  empty: boolean;
+  message?: string;
+  hygiene?: { raw_count: number; kept: number; dropped: number; filter?: string };
+  grid?: string;
+  alpha?: HybridAlphaInfo;
+  monthly?: HybridMonthlyRow[];
+  transition_chart?: { label: string; raw_modis: number; raw_viirs: number; harmonized: number }[];
+  map?: {
+    harmonized_cells: DensityPoint[];
+    viirs_points: {
+      lat: number; lon: number; ts: string; frp: number;
+      confidence?: number | null; satellite?: string;
+    }[];
+    window?: [string, string];
+  };
+  anomaly_card?: {
+    year?: number; month?: number;
+    harmonized_activity?: number;
+    historical_median?: number | null;
+    anomaly_pct?: number | null;
+  };
+  fallback_badge?: boolean;
+  fallback_message_tr?: string | null;
+  fallback_message_en?: string | null;
+  note?: string;
+  meta?: AreaCalendarResult["meta"];
+}
+
 export interface AreaCalendarResult {
   empty: boolean;
   message?: string;
-  series?: "harmonized" | "raw";
+  series?: "harmonized" | "raw" | "hybrid";
+  hybrid?: AreaHybridResult | null;
   meta?: {
     area_km2?: number;
     rows?: number;

@@ -1,0 +1,19 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Alaz: Start Demo",
+      "type": "node-terminal",
+      "request": "launch",
+      "command": "bash scripts/start.sh --with-slides",
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "name": "Alaz: Start (API + UI)",
+      "type": "node-terminal",
+      "request": "launch",
+      "command": "bash scripts/start.sh",
+      "cwd": "${workspaceFolder}"
+    }
+  ]
+}

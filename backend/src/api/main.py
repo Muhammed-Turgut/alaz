@@ -19,9 +19,9 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse, PlainTextResponse
 
 from src.api.schemas import (
-    AreaCalendarRequest, AreaDensityRequest, AreaScopeRequest, AreaSeriesRequest,
-    BriefingRequest, ExportHotspotsRequest, HarmonizeRequest, HealthResponse,
-    InterpretRequest, ROIRequest,
+    AreaCalendarRequest, AreaDensityRequest, AreaHybridRequest, AreaScopeRequest,
+    AreaSeriesRequest, BriefingRequest, ExportHotspotsRequest, HarmonizeRequest,
+    HealthResponse, InterpretRequest, ROIRequest,
 )
 from src.data.fires_feed import FiresFeed
 from src.data.regions import REGIONS
@@ -335,6 +335,47 @@ def area_density(req: AreaDensityRequest):
     )
 
 
+@app.post("/api/area-hybrid")
+def area_hybrid(req: AreaHybridRequest):
+    """Hibrit uyumlaştırma: aktif hücre ızgarası + dinamik bölgesel α."""
+    return _area_call(
+        lambda: _st().area_hybrid(
+            polygon=req.polygon, bbox=req.bbox, grid=req.grid,
+            fallback_alpha=req.fallback_alpha, force=req.force,
+            map_recent_days=req.map_recent_days,
+            map_years=req.map_years,
+            map_start=req.map_start,
+            map_end=req.map_end,
+        ),
+        req,
+    )
+
+
+@app.post("/api/export-hybrid-csv")
+def export_hybrid_csv(req: AreaHybridRequest):
+    """Aylık hibrit uyumlaştırma tablosunu CSV indir."""
+    try:
+        text, info = _st().export_hybrid_csv(
+            polygon=req.polygon, bbox=req.bbox, grid=req.grid,
+            fallback_alpha=req.fallback_alpha, force=req.force,
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(503, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(503, str(exc)) from exc
+    n = info.get("n", 0)
+    fname = f"alaz-hybrid-monthly-{n}.csv"
+    headers = {
+        "Content-Disposition": f'attachment; filename="{fname}"',
+        "X-Alaz-Rows": str(n),
+        "X-Alaz-Alpha": str(info.get("alpha") or ""),
+        "X-Alaz-Fallback": "1" if info.get("fallback_used") else "0",
+    }
+    return PlainTextResponse(text, media_type="text/csv; charset=utf-8", headers=headers)
+
+
 @app.post("/api/briefing")
 def briefing(req: BriefingRequest):
     start, end = _date(req.start, "start"), _date(req.end, "end")
@@ -387,6 +428,10 @@ def interpret(req: InterpretRequest):
             section=req.section or "overview",
             question=req.question,
             lang=req.lang or "tr",
+            series=req.series or "raw",
+            start_year=req.start_year,
+            end_year=req.end_year,
+            target_year=req.target_year,
         )
     except FileNotFoundError as exc:
         raise HTTPException(503, str(exc)) from exc

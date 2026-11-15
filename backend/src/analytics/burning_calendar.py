@@ -147,6 +147,10 @@ def current_month_vs_median(daily: pd.Series, year: int | None = None, month: in
         }
     med = float(np.median(hist))
     pct = float(100.0 * np.mean(np.asarray(hist) <= cur))
+    if med <= 1e-12:
+        anomaly_pct = None if cur == 0 else 100.0
+    else:
+        anomaly_pct = round(100.0 * (cur / med - 1.0), 1)
     return {
         "available": True,
         "year": year,
@@ -154,6 +158,7 @@ def current_month_vs_median(daily: pd.Series, year: int | None = None, month: in
         "month_total": round(cur, 2),
         "historical_median": round(med, 2),
         "ratio": None if med <= 0 else round(cur / med, 3),
+        "anomaly_pct": anomaly_pct,
         "percentile": round(pct, 1),
         "n_years": len(hist),
         "historical_p10": round(float(np.percentile(hist, 10)), 2),

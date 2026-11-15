@@ -6,7 +6,7 @@ import { api } from "./api";
 import { fmt } from "./format";
 import type { FirePoint } from "./live/processor";
 import { MapView, type LiveMapStyle } from "./mapView";
-import type { AreaDensityResult, BBox, HexPayload, LatLng, Sensor } from "./types";
+import type { AreaDensityResult, AreaHybridResult, BBox, HexPayload, LatLng, Sensor } from "./types";
 import { Seg } from "./ui";
 import { viz } from "./viz";
 import styles from "./aether.module.css";
@@ -64,8 +64,12 @@ export function MapTab(p: Props) {
   const { sensor, onSensor: setSensor } = p;
   const [liveStyle, setLiveStyle] = useState<LiveMapStyle>("points");
   const [archHeat, setArchHeat] = useState(false);
+  const [hybridOn, setHybridOn] = useState(false);
+  const [showHybridGrid, setShowHybridGrid] = useState(true);
+  const [showViirsPts, setShowViirsPts] = useState(true);
   const [years, setYears] = useState<DensityYears>("5");
   const [density, setDensity] = useState<AreaDensityResult | null>(null);
+  const [hybrid, setHybrid] = useState<AreaHybridResult | null>(null);
   const [densBusy, setDensBusy] = useState(false);
   const [densErr, setDensErr] = useState("");
   const prefs = usePrefs();
@@ -135,16 +139,99 @@ export function MapTab(p: Props) {
     if (!p.live) setLiveStyle("points");
     else {
       setArchHeat(false);
+      setHybridOn(false);
       setDensity(null);
+      setHybrid(null);
       view.current?.setArchiveHeat(false);
+      view.current?.setArchivePointsVisible(false);
       view.current?.setArchiveDensity([]);
     }
   }, [p.live]);
 
+  // Hybrid overlay: harmonized grid + real VIIRS points
+  useEffect(() => {
+    if (p.live || !p.archiveMode || !hybridOn) {
+      if (!archHeat) {
+        view.current?.setArchiveHeat(false);
+        view.current?.setArchiveDensity([]);
+      }
+      view.current?.setArchivePointsVisible(false);
+      if (!hybridOn) setHybrid(null);
+      return;
+    }
+    if (!hasRoi || !p.roi) {
+      setDensErr(en ? "Draw a ROI polygon first." : "Önce ROI poligonu çiz.");
+      return;
+    }
+    let alive = true;
+    setDensBusy(true);
+    setDensErr("");
+    setArchHeat(false);
+    api.areaHybrid({ polygon: p.roi, grid: "h3", map_years: Number(years) })
+      .then((res) => {
+        if (!alive) return;
+        setHybrid(res);
+        if (res.empty) {
+          setDensErr(res.message || (en ? "No hybrid data." : "Hibrit veri yok."));
+          view.current?.setArchiveDensity([]);
+          view.current?.setArchiveHeat(false);
+          view.current?.setArchivePointsVisible(false);
+          return;
+        }
+        const cells = (res.map?.harmonized_cells ?? []).map((pt) => ({
+          lat: pt.lat,
+          lon: pt.lon,
+          w: pt.w ?? pt.n,
+          n: Math.max(1, Math.round(pt.n)),
+          h3: pt.h3,
+          boundary: pt.boundary,
+          frp_sum: pt.frp_sum,
+        }));
+        if (showHybridGrid && cells.length) {
+          view.current?.setArchiveDensity(cells, res.map?.window ?? null);
+          view.current?.setArchiveHeat(true);
+        } else {
+          view.current?.setArchiveHeat(false);
+          view.current?.setArchiveDensity([]);
+          if (showHybridGrid && !cells.length) {
+            setDensErr(en
+              ? `No hybrid cells in last ${years}y window — try a longer range.`
+              : `Son ${years} yılda hibrit hücre yok — daha uzun aralık dene.`);
+          }
+        }
+        const pts: FirePoint[] = (res.map?.viirs_points ?? []).map((v) => ({
+          latitude: v.lat,
+          longitude: v.lon,
+          instrument: "VIIRS",
+          satellite: v.satellite || "SNPP",
+          acquiredAt: v.ts,
+          frp: v.frp,
+          temperatureCelsius: 0,
+          dataMode: "ARCHIVE",
+          confidenceCode: (v.confidence != null && v.confidence >= 80 ? "HIGH"
+            : v.confidence != null && v.confidence > 30 ? "NOMINAL" : "LOW"),
+          confidenceLabel: v.confidence != null ? String(v.confidence) : "n",
+        }));
+        view.current?.setPoints(showViirsPts ? pts : []);
+        view.current?.setArchivePointsVisible(showViirsPts && pts.length > 0);
+        if ((showHybridGrid && cells.length) || (showViirsPts && pts.length)) {
+          setDensErr("");
+        }
+      })
+      .catch((e: Error) => {
+        if (!alive) return;
+        setDensErr(e.message);
+        view.current?.setArchiveHeat(false);
+        view.current?.setArchivePointsVisible(false);
+      })
+      .finally(() => alive && setDensBusy(false));
+    return () => { alive = false; };
+  }, [p.live, p.archiveMode, hybridOn, hasRoi, p.roi, showHybridGrid, showViirsPts, years, en]);
+
   // Fetch archive density when ROI + years + heat toggle
   useEffect(() => {
-    if (p.live || !p.archiveMode || !archHeat) {
-      view.current?.setArchiveHeat(false);
+    if (p.live || !p.archiveMode || !archHeat || hybridOn) {
+      if (!hybridOn) view.current?.setArchiveHeat(false);
       return;
     }
     if (!hasRoi || !p.roi) {
@@ -222,6 +309,19 @@ export function MapTab(p: Props) {
               {sensor !== "VIIRS" && <span>MODIS {fmt(p.livePerInstrument.MODIS)}</span>}
               {sensor !== "MODIS" && <span>VIIRS {fmt(p.livePerInstrument.VIIRS)}</span>}
             </>
+          ) : hybridOn && hybrid && !hybrid.empty ? (
+            <>
+              <span>
+                <b>{en ? "Hybrid α" : "Hibrit α"}</b>
+                {hybrid.alpha?.value != null ? `=${hybrid.alpha.value.toFixed(2)}` : ""}
+              </span>
+              <span>
+                {(hybrid.map?.window?.[0] || "?")} → {(hybrid.map?.window?.[1] || "?")}
+              </span>
+              <span>{fmt(hybrid.map?.harmonized_cells?.length ?? 0)} {en ? "cells" : "hücre"}</span>
+              <span>{fmt(hybrid.map?.viirs_points?.length ?? 0)} VIIRS</span>
+              {densBusy && <span>{en ? "loading…" : "yükleniyor…"}</span>}
+            </>
           ) : archHeat && density && !density.empty ? (
             <>
               <span>
@@ -247,8 +347,8 @@ export function MapTab(p: Props) {
             <span>
               <b>{en ? "Archive mode" : "Arşiv modu"}</b>
               {en
-                ? " — draw a polygon, then open density map for last X years."
-                : " — poligon çiz, sonra son X yıl yoğunluk haritasını aç."}
+                ? " — draw ROI, then Hybrid layers or Density map (+ year range)."
+                : " — ROI çiz, sonra Hibrit katmanlar veya Yoğunluk (+ yıl aralığı)."}
             </span>
           )}
         </div>
@@ -261,17 +361,63 @@ export function MapTab(p: Props) {
           <div className={styles.mapBarCtl}>
             <button
               type="button"
-              className={`${styles.archHeatBtn} ${archHeat ? styles.archHeatOn : ""}`}
-              aria-pressed={archHeat}
-              disabled={!hasRoi && !archHeat}
+              className={`${styles.archHeatBtn} ${hybridOn ? styles.archHeatOn : ""}`}
+              aria-pressed={hybridOn}
+              disabled={!hasRoi && !hybridOn}
+              title={!hasRoi ? (en ? "Draw a ROI first" : "Önce ROI çiz") : undefined}
+              onClick={() => {
+                setHybridOn((v) => {
+                  const next = !v;
+                  if (next) setArchHeat(false);
+                  return next;
+                });
+              }}
+            >
+              {hybridOn
+                ? (en ? "Hide hybrid" : "Hibriti gizle")
+                : (en ? "Hybrid layers" : "Hibrit katmanlar")}
+            </button>
+            <button
+              type="button"
+              className={`${styles.archHeatBtn} ${archHeat && !hybridOn ? styles.archHeatOn : ""}`}
+              aria-pressed={archHeat && !hybridOn}
+              disabled={(!hasRoi && !archHeat) || hybridOn}
               title={!hasRoi ? (en ? "Draw a ROI first" : "Önce ROI çiz") : undefined}
               onClick={() => setArchHeat((v) => !v)}
             >
-              {archHeat
+              {archHeat && !hybridOn
                 ? (en ? "Hide density" : "Yoğunluğu gizle")
                 : (en ? "Density map" : "Yoğunluk haritası")}
             </button>
-            {archHeat && (
+            {hybridOn && (
+              <>
+                <Seg
+                  value={years}
+                  onChange={setYears}
+                  options={yearOpts.map((o) => ({
+                    v: o.v,
+                    label: en ? `${o.v}y` : `${o.v} yıl`,
+                  }))}
+                />
+                <label className={styles.layerChk}>
+                  <input
+                    type="checkbox"
+                    checked={showHybridGrid}
+                    onChange={(e) => setShowHybridGrid(e.target.checked)}
+                  />
+                  {en ? "Harm. grid" : "Uyum ızgara"}
+                </label>
+                <label className={styles.layerChk}>
+                  <input
+                    type="checkbox"
+                    checked={showViirsPts}
+                    onChange={(e) => setShowViirsPts(e.target.checked)}
+                  />
+                  {en ? "VIIRS points" : "VIIRS noktalar"}
+                </label>
+              </>
+            )}
+            {archHeat && !hybridOn && (
               <>
                 <Seg
                   value={years}
@@ -289,6 +435,23 @@ export function MapTab(p: Props) {
           </div>
         ) : null}
       </div>
+      {hybridOn && hybrid?.fallback_badge && (
+        <p className={styles.hint} role="status">
+          {en ? (hybrid.fallback_message_en || "") : (hybrid.fallback_message_tr || "")}
+          {hybrid.alpha?.value != null && (
+            <> · α={hybrid.alpha.value.toFixed(2)}
+              {hybrid.alpha.n_months != null ? ` (n=${hybrid.alpha.n_months})` : ""}
+            </>
+          )}
+        </p>
+      )}
+      {hybridOn && hybrid && !hybrid.empty && !hybrid.fallback_badge && hybrid.alpha && (
+        <p className={styles.hint} role="status">
+          {en ? "Regional α" : "Bölgesel α"}={hybrid.alpha.value.toFixed(3)}
+          {hybrid.alpha.r2 != null ? ` · R²=${hybrid.alpha.r2.toFixed(3)}` : ""}
+          {` · n=${hybrid.alpha.n_months}`}
+        </p>
+      )}
       <p className={styles.hint}>{t.mapHotspotNote}</p>
       {p.live && liveStyle === "heatmap" && (
         <p className={styles.hint} role="note">
@@ -327,7 +490,7 @@ export function MapTab(p: Props) {
               + "."}
         </div>
       )}
-      {densErr && archHeat && <div className={styles.banner}>{densErr}</div>}
+      {densErr && (archHeat || hybridOn) && <div className={styles.banner}>{densErr}</div>}
 
       {p.hasSelection ? (
         <section className={styles.inspectBand}>

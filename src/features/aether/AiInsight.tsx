@@ -19,6 +19,11 @@ interface Props {
   disabledReason?: string;
   /** Kompakt: kart içi / altı */
   compact?: boolean;
+  /** Takvim sekmesi: ekrandaki yıl aralığı / seri (AI dayanağı bunlarla üretilir) */
+  series?: "harmonized" | "raw" | "hybrid";
+  startYear?: number;
+  endYear?: number;
+  targetYear?: number;
 }
 
 /** src/assets/icons/ai_icon.svg — currentColor ile temaya uyar */
@@ -40,7 +45,10 @@ function AiIcon({ size = 28 }: { size?: number }) {
   );
 }
 
-export function AiInsight({ focus, section, label, roi, disabledReason, compact }: Props) {
+export function AiInsight({
+  focus, section, label, roi, disabledReason, compact,
+  series, startYear, endYear, targetYear,
+}: Props) {
   const t = useT();
   const en = t.lang === "en";
   const [busy, setBusy] = useState(false);
@@ -59,6 +67,11 @@ export function AiInsight({ focus, section, label, roi, disabledReason, compact 
       setError(en ? "Draw a polygon on the map first." : "Önce haritada bir poligon çiz.");
       return;
     }
+    if (!question.trim()) {
+      setError(en ? "Write your question first — that is the main goal." : "Önce sorunuzu yazın — temel hedef odur.");
+      setOpen(true);
+      return;
+    }
     setBusy(true);
     setError("");
     setOpen(true);
@@ -69,6 +82,10 @@ export function AiInsight({ focus, section, label, roi, disabledReason, compact 
         section,
         question: question.trim() || undefined,
         lang: t.lang,
+        series,
+        start_year: startYear,
+        end_year: endYear,
+        target_year: targetYear,
       });
       setUsed(r.used_numbers ?? null);
       if (r.empty) {
@@ -108,12 +125,17 @@ export function AiInsight({ focus, section, label, roi, disabledReason, compact 
           <h3 className={styles.aiTitle}>AI bakışı — {label}</h3>
           {!compact && (
             <p className={styles.aiHint}>
-              Yalnızca bu tablo / grafiğin Alaz sayılarına dayanır (grafik resmi gönderilmez).
+              Temel hedef sorun; tablo sayıları kaynak. Alaz bağlamı: MODIS↔VIIRS / VIIRS-eşdeğer ölçek
+              (grafik resmi gönderilmez).
             </p>
           )}
         </div>
         {compact && ready && (
-          <Button className={styles.aiQuickBtn} onClick={() => void run()} disabled={busy}>
+          <Button
+            className={styles.aiQuickBtn}
+            onClick={() => void run()}
+            disabled={busy || !question.trim()}
+          >
             {busy ? "..." : "Cevap üret"}
           </Button>
         )}
@@ -127,12 +149,12 @@ export function AiInsight({ focus, section, label, roi, disabledReason, compact 
         <>
           {!compact && (
             <label className={styles.aiQuestion}>
-              İsteğe bağlı soru
+              Sorun (temel hedef)
               <input
                 type="text"
                 value={question}
                 maxLength={500}
-                placeholder={`Örn. Bu «${label}» ne anlatıyor?`}
+                placeholder={`Örn. 2012 sıçraması sensör mü, gerçek aktivite mi? («${label}»)`}
                 onChange={(e) => setQuestion(e.target.value)}
                 disabled={busy}
               />
@@ -140,7 +162,7 @@ export function AiInsight({ focus, section, label, roi, disabledReason, compact 
           )}
           <div className={styles.aiActions}>
             {!compact && (
-              <Button onClick={() => void run()} disabled={busy || !ready}>
+              <Button onClick={() => void run()} disabled={busy || !ready || !question.trim()}>
                 {busy ? "Üretiliyor..." : "Cevap üret"}
               </Button>
             )}
@@ -150,7 +172,7 @@ export function AiInsight({ focus, section, label, roi, disabledReason, compact 
                   type="text"
                   value={question}
                   maxLength={500}
-                  placeholder="İsteğe bağlı soru..."
+                  placeholder="Sorunu yaz (zorunlu)..."
                   onChange={(e) => setQuestion(e.target.value)}
                   disabled={busy}
                 />

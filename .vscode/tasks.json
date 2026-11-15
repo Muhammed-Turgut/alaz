@@ -1,0 +1,62 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Alaz: Start (API + UI)",
+      "type": "shell",
+      "command": "bash \"${workspaceFolder}/scripts/start.sh\"",
+      "options": {
+        "cwd": "${workspaceFolder}",
+        "env": {
+          "PATH": "${env:HOME}/nodejs/bin:/usr/local/bin:/usr/bin:/bin:${env:PATH}"
+        }
+      },
+      "group": "none",
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "focus": true,
+        "clear": true
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Alaz: Start Demo (API + UI + Sunum)",
+      "type": "shell",
+      "command": "bash \"${workspaceFolder}/scripts/start.sh\" --with-slides",
+      "options": {
+        "cwd": "${workspaceFolder}",
+        "env": {
+          "PATH": "${env:HOME}/nodejs/bin:/usr/local/bin:/usr/bin:/bin:${env:PATH}"
+        }
+      },
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "focus": true,
+        "clear": true
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Alaz: Setup (ilk kurulum)",
+      "type": "shell",
+      "command": "bash \"${workspaceFolder}/scripts/setup.sh\"",
+      "options": {
+        "cwd": "${workspaceFolder}",
+        "env": {
+          "PATH": "${env:HOME}/nodejs/bin:/usr/local/bin:/usr/bin:/bin:${env:PATH}"
+        }
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      },
+      "problemMatcher": []
+    }
+  ]
+}

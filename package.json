@@ -4,6 +4,9 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
+    "setup": "bash scripts/setup.sh",
+    "start": "bash scripts/start.sh",
+    "start:demo": "bash scripts/start.sh --with-slides",
     "dev": "vite",
     "api": "cd backend && .venv/bin/python run.py",
     "build": "tsc -b && vite build",

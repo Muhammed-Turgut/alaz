@@ -83,6 +83,8 @@ export class MapView {
   private liveStyle: LiveMapStyle = "points";
   /** Archive multi-year density as H3 polygons (exact per-cell counts). */
   private archiveHeat = false;
+  /** When true in archive mode, show FIRMS point layer (hybrid VIIRS overlay). */
+  private archivePoints = false;
   private fires: FirePoint[] = [];
   private archiveDensity: ArchiveDensityPoint[] = [];
   private densWin: [string | null, string | null] | null = null;
@@ -348,13 +350,15 @@ export class MapView {
 
   private applyMode() {
     if (!this.ready) return;
-    const showPoints = this.live && this.liveStyle === "points";
+    const showPoints =
+      (this.live && this.liveStyle === "points")
+      || (!this.live && this.archivePoints);
     const showLiveHeat = this.live && (this.liveStyle === "heatmap" || this.liveStyle === "heatmap_frp");
     const showArchiveHeat = !this.live && this.archiveHeat;
     // Archive density uses H3 polygon fill on hexes (exact per-cell counts), not kernel heatmap.
     for (const id of HEX_VISUAL) {
       if (!this.map.getLayer(id)) continue;
-      const on = showArchiveHeat || (!this.live && !this.archiveHeat);
+      const on = showArchiveHeat || (!this.live && !this.archiveHeat && !this.archivePoints);
       this.map.setLayoutProperty(id, "visibility", on ? "visible" : "none");
     }
     // Density polygons should stay visible at low zoom (unlike live hex fade-in).
@@ -418,6 +422,13 @@ export class MapView {
     this.archiveHeat = on && !this.live;
     this.applyMode();
     this.renderArchiveDensity();
+  }
+
+  /** Show real VIIRS (or other) point coordinates in archive/hybrid mode. */
+  setArchivePointsVisible(on: boolean) {
+    this.archivePoints = on && !this.live;
+    this.applyMode();
+    this.renderFires();
   }
 
   setArchiveDensity(points: ArchiveDensityPoint[], window?: [string | null, string | null] | null) {
@@ -586,9 +597,24 @@ export class MapView {
     this.renderBox();
   }
 
-  /** Bölgeye yakınlaşmak yerine globe'u bölgenin üstüne döndürür (dünya görünümü korunur). */
+  /** BBox = [south, west, north, east] — ROI'ye fitBounds ile gider. */
   fitBBox(bbox: BBox) {
-    this.map.jumpTo({ center: [(bbox[1] + bbox[3]) / 2, (bbox[0] + bbox[2]) / 2], zoom: 3.4 });
+    const [south, west, north, east] = bbox;
+    const pad = 0.12;
+    try {
+      this.map.fitBounds(
+        [
+          [west - pad, south - pad],
+          [east + pad, north + pad],
+        ],
+        { padding: 48, maxZoom: 10, duration: 650 },
+      );
+    } catch {
+      this.map.jumpTo({
+        center: [(west + east) / 2, (south + north) / 2],
+        zoom: 6,
+      });
+    }
   }
 
   fitWorld() {
@@ -702,7 +728,7 @@ export class MapView {
     }
     this.endDrawing();
     if (pts.length < 3) return false;
-    this.setRoiPolygon(pts);
+    this.setRoiPolygon(pts, { fit: true });
     this.opt.onRoi(pts);
     return true;
   }

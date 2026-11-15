@@ -9,17 +9,20 @@
 ## Quick start
 
 ```bash
-# Backend (Python 3.11+ recommended)
-cd backend
-python -m venv .venv
-source .venv/bin/activate   # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
-cp .env.example .env        # set FIRMS_MAP_KEY, optional DEEPSEEK_API_KEY
-cd ..
-npm install
-npm run api                 # http://127.0.0.1:8000
-npm run dev                 # Vite UI
+# İlk kurulum (bir kez)
+npm run setup
+# backend/.env içinde FIRMS_MAP_KEY (isteğe bağlı DEEPSEEK_API_KEY) ayarla
+
+# Her şeyi tek komutla ayağa kaldır (API :8000 + UI :5173)
+npm start
+
+# Sunum dahil (API + UI + slides :5500)
+npm run start:demo
 ```
+
+Ctrl+C tüm süreçleri durdurur.
+
+Ayrı ayrı (gerekirse): `npm run api` · `npm run dev`
 
 Optional: `VITE_MAPBOX_TOKEN` for Mapbox basemap (OSM fallback without token).
 

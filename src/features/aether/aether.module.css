@@ -69,6 +69,63 @@
 .full { width: 100%; margin-top: var(--space-2); }
 .hint { margin: 6px 0 0; font-size: 14px; color: var(--color-text-muted); }
 .errText { margin: 6px 0 0; font-size: 12px; color: var(--color-danger); }
+.disclaimer {
+  margin: 0 0 var(--space-3);
+  padding: var(--space-3);
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--color-text);
+  background: var(--color-warning-bg);
+  border-left: 3px solid var(--color-warning);
+}
+.glossaryToggle {
+  width: 100%;
+  padding: 8px 0;
+  font: inherit;
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  text-align: left;
+  color: var(--color-text-muted);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+.glossaryBox {
+  margin-top: var(--space-2);
+  padding: var(--space-3);
+  background: var(--color-surface);
+}
+.glossaryBox h4 {
+  margin: 0 0 var(--space-2);
+  font-size: 12px;
+  color: var(--color-text);
+}
+.glossaryItem { margin-bottom: var(--space-3); }
+.demoList {
+  margin: 0 0 var(--space-3);
+  padding-left: 1.25rem;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--color-text-muted);
+}
+.demoList li { margin-bottom: 0.35rem; }
+.demoActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+.glossaryItem dt {
+  font-weight: 600;
+  font-size: 12px;
+  color: var(--color-text);
+}
+.glossaryItem dd {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
 .foot { padding-top: var(--space-3); font-size: 11px; color: var(--color-text-muted); }
 .metaBox {
   margin-top: var(--space-3);
@@ -203,8 +260,72 @@
 
 /* harita */
 .mapBar { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); margin-bottom: var(--space-3); flex-wrap: wrap; }
+.mapBarCtl { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.mapBarCtl .seg { margin: 0; }
+.mapBarCtl .seg button { flex: none; padding: 6px 10px; }
 .mapStats { display: flex; align-items: baseline; gap: var(--space-4); color: var(--color-text-muted); font-size: var(--text-sm); }
 .mapStats b { font: 400 28px var(--font-display); color: var(--color-text); letter-spacing: 0.02em; }
+.heatBar {
+  width: 140px;
+  height: 10px;
+  margin: 6px 0 2px;
+  border: 1px solid var(--color-border);
+}
+.heatBarLabels {
+  display: flex;
+  justify-content: space-between;
+  width: 140px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--color-text-muted);
+}
+.heatBins {
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+  max-width: 200px;
+  font-size: 10px;
+  line-height: 1.35;
+  color: var(--color-text-muted);
+}
+.heatBins li { margin-top: 2px; }
+.heatNot {
+  margin-top: 4px;
+  max-width: 200px;
+  font-size: 10px;
+  line-height: 1.35;
+  color: var(--color-text-muted);
+}
+.heatMeta {
+  margin-top: 4px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--color-text);
+}
+.archHeatBtn {
+  padding: 6px 10px;
+  font: inherit;
+  font-size: 12px;
+  white-space: nowrap;
+  color: var(--color-gray-text);
+  background: var(--color-bg-subtle);
+  border: 1px solid var(--color-border);
+  cursor: pointer;
+}
+.archHeatBtn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.archHeatBtn:hover:not(:disabled) {
+  color: var(--color-text);
+  background: var(--color-surface);
+}
+.archHeatOn {
+  font-weight: 600;
+  color: var(--color-primary-contrast);
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+}
 .mapHint { margin: 0 0 var(--space-3); font-size: var(--text-sm); color: var(--color-text-muted); }
 .inspectBand {
   position: relative;

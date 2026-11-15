@@ -83,12 +83,15 @@ export function breakChart(
         { label: "_hi", data: s.harmonized_hi, borderWidth: 0, pointRadius: 0, backgroundColor: alpha(v.harmonized, 0.16), fill: "-1" },
         { label: "Harmonize (VIIRS-eşdeğeri), %90 GA", data: s.harmonized, borderColor: v.harmonized, backgroundColor: v.harmonized, borderWidth: 1.8, pointRadius: 0 },
         {
-          label: archive ? "VIIRS yerel (ROI)" : "Gerçek SNPP",
+          label: archive
+            ? "VIIRS comparison reference (ROI) — absent pre-2012"
+            : "Synthetic VIIRS-native reference",
           data: s.truth_snpp_everywhere,
           borderColor: v.truth,
           borderWidth: 1.2,
           borderDash: [6, 3],
           pointRadius: 0,
+          spanGaps: false,
         },
       ],
     },
@@ -96,7 +99,13 @@ export function breakChart(
       interaction: { mode: "index", intersect: false },
       scales: {
         x: { ticks: { maxTicksLimit: 14, autoSkip: true }, grid: { display: false } },
-        y: { title: { display: true, text: freq === "monthly" ? "sıcak nokta / ay" : "sıcak nokta / yıl" }, ticks: { callback: (x: unknown) => fmt(Number(x)) } },
+        y: {
+          title: {
+            display: true,
+            text: freq === "monthly" ? "hotspot detections / month" : "hotspot detections / year",
+          },
+          ticks: { callback: (x: unknown) => fmt(Number(x)) },
+        },
       },
       plugins: {
         legend: {
@@ -110,9 +119,23 @@ export function breakChart(
         },
         tooltip: {
           filter: (i: { dataset: { label?: string } }) => !(i.dataset.label ?? "").startsWith("_"),
-          callbacks: { label: (c: { dataset: { label?: string }; parsed: { y: number } }) => ` ${c.dataset.label}: ${fmt(c.parsed.y)}` },
+          callbacks: {
+            label: (c: { dataset: { label?: string }; parsed: { y: number | null } }) => {
+              if (c.parsed.y == null || Number.isNaN(c.parsed.y)) {
+                return ` ${c.dataset.label}: VIIRS reference unavailable`;
+              }
+              return ` ${c.dataset.label}: ${fmt(c.parsed.y)}`;
+            },
+          },
         },
-        vlines: { lines },
+        vlines: {
+          lines: [
+            ...lines,
+            { x: s.labels.indexOf("2012-01") >= 0 ? s.labels.indexOf("2012-01") : s.labels.indexOf("2012"), color: v.warn, label: "VIIRS SNPP", row: 0 },
+            { x: s.labels.indexOf("2018-04") >= 0 ? s.labels.indexOf("2018-04") : s.labels.indexOf("2018"), color: v.sat.NOAA20, label: "NOAA-20", row: 1 },
+            { x: s.labels.indexOf("2024-01") >= 0 ? s.labels.indexOf("2024-01") : s.labels.indexOf("2024"), color: v.sat.NOAA21, label: "NOAA-21", row: 2 },
+          ].filter((l) => typeof l.x === "number" && l.x >= 0),
+        },
       },
       layout: { padding: { top: 8, right: 12 } },
     },

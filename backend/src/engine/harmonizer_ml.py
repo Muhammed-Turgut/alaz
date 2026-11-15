@@ -424,6 +424,11 @@ class HarmonizerModel:
             nm = np.full(len(df), float(nm))
         if nv.ndim == 0:
             nv = np.full(len(df), float(nv))
+        # Caller may pass platform counts for a parent frame — recompute if lengths diverge.
+        if len(nm) != len(df):
+            nm = n_operating(df["ts"], "MODIS")
+        if len(nv) != len(df):
+            nv = n_operating(df["ts"], "VIIRS")
         if (~is_modis).any():
             w[~is_modis] = 1.0 / nv[~is_modis]
             lo[~is_modis] = hi[~is_modis] = w[~is_modis]

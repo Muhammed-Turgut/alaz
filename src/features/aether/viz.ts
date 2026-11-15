@@ -33,7 +33,7 @@ export interface VizColors {
   calRamp: string[];
   conf: { HIGH: string; NOMINAL: string; LOW: string; UNKNOWN: string };
   cluster: { small: string; medium: string };
-  sat: { Terra: string; Aqua: string; SNPP: string; NOAA20: string };
+  sat: { Terra: string; Aqua: string; SNPP: string; NOAA20: string; NOAA21: string };
 }
 
 export function viz(): VizColors {
@@ -70,6 +70,7 @@ export function viz(): VizColors {
       Aqua: cssVar("--viz-sat-aqua"),
       SNPP: cssVar("--viz-sat-snpp"),
       NOAA20: cssVar("--viz-sat-noaa20"),
+      NOAA21: cssVar("--viz-sat-noaa21"),
     },
   };
 }

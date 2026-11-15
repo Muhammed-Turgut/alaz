@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 
 import { Button } from "@/components/ui/Button";
+import { useT } from "@/lib/i18n";
 import { usePrefs } from "@/lib/preferences";
 import { api } from "./api";
 import { driverChart, drawGeometry } from "./charts";
@@ -57,7 +58,7 @@ function GeometryCard({ g, visible }: { g: GeometryPayload; visible: boolean }) 
   );
 }
 
-const SATS = ["Aqua", "Terra", "SNPP", "NOAA20"];
+const SATS = ["Aqua", "Terra", "SNPP", "NOAA20", "NOAA21"];
 const TR_DEFAULT = { lat: 39.0, lon: 35.2, date: "2021-08-05", time: 1100 };
 
 function roiCentroid(roi: LatLng[] | null): { lat: number; lon: number } | null {
@@ -110,7 +111,7 @@ function HarmonizeCard({ source, roi }: { source: Source; roi: LatLng[] | null }
   return (
     <Card title="Bir tespiti harmonize et">
       <Hint>
-        Varsayılan koordinat {roi && roi.length >= 3 ? "çizdiğin ROI merkezi" : "Türkiye içi"}.
+        Varsayılan koordinat {roi && roi.length >= 3 ? "çizdiğin ROI merkezi" : "örnek (dünya geneli ROI serbest)"}.
       </Hint>
       <form key={formKey} onSubmit={submit} className={styles.formGrid}>
         <label>Enlem<input name="latitude" type="number" step="any" defaultValue={defaults.lat} required /></label>
@@ -148,6 +149,7 @@ function HarmonizeCard({ source, roi }: { source: Source; roi: LatLng[] | null }
           </div>
           <Hint>
             Yerel güneş saati {fmt(res.local_solar_time, 1)} sa · diurnal faktör {fmt(res.diurnal_factor, 2)} · diurnal normalize FRP {fmt(res.frp_diurnal_normalized, 1)} MW · gözlenen {fmt(res.frp_obs, 1)} MW.
+            {" "}FRP = radyatif güç (yanmış alan değil); eşdeğer VIIRS sıcak nokta = ölçek tahmini (yangın sayısı değil).
           </Hint>
           <MiniChart draw={draw} height={190} />
         </div>
@@ -176,9 +178,11 @@ export function ExplainTab({
     return () => { live = false; };
   }, []);
 
+  const t = useT();
   return (
     <section>
       <div className={styles.panelHead}><h2>Sıcak nokta açıklayıcı</h2></div>
+      <div className={styles.disclaimer} role="note">{t.disclaimerExplain}</div>
       {error && <div className={styles.banner}>{error}</div>}
       <div className={styles.grid2}>
         <HarmonizeCard source={source} roi={roi} />

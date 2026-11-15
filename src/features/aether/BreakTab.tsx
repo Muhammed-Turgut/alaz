@@ -4,6 +4,7 @@ import { api } from "./api";
 import { breakChart } from "./charts";
 import { fmt, fmtP, signed } from "./format";
 import type { BreakPayload, BreakReport, LatLng, SeriesPayload, Source } from "./types";
+import { useT } from "@/lib/i18n";
 import { AiInsight } from "./AiInsight";
 import { Badge, Card, ChartBox, EmptyRoi, Seg, Hint } from "./ui";
 import styles from "./aether.module.css";
@@ -11,14 +12,16 @@ import styles from "./aether.module.css";
 const NAMES: Record<keyof BreakPayload["reports"], { label: string; cls: string }> = {
   raw_all: { label: "Ham, raporlandığı gibi", cls: styles.cRaw },
   raw_filtered: { label: "Ham, kaynaklar çıkarılmış", cls: styles.cRaw },
-  harmonized: { label: "Harmonize", cls: styles.cHarm },
-  truth: { label: "Gerçek (VIIRS / SNPP)", cls: styles.cTruth },
+  harmonized: { label: "Harmonize (VIIRS-eşd.)", cls: styles.cHarm },
+  truth: { label: "VIIRS referansı (karşılaştırma)", cls: styles.cTruth },
 };
 
 const PCell = ({ p }: { p: number }) => (
   <td>
     {fmtP(p)}{" "}
-    <Badge tone={p < 0.05 ? "bad" : "ok"}>{p < 0.05 ? "kırılma" : "yok"}</Badge>
+    <Badge tone={p < 0.05 ? "warn" : "ok"} title="p&lt;0.05 otokorelasyonlu serilerde abartılı olabilir">
+      {p < 0.05 ? "p&lt;0,05" : "p≥0,05"}
+    </Badge>
   </td>
 );
 
@@ -34,6 +37,7 @@ interface Props {
 }
 
 export function BreakTab({ source, roi, onDraw }: Props) {
+  const t = useT();
   const [freq, setFreq] = useState<"monthly" | "annual">("monthly");
   const [series, setSeries] = useState<SeriesPayload | null>(null);
   const [brk, setBrk] = useState<BreakPayload | null>(null);
@@ -116,6 +120,7 @@ export function BreakTab({ source, roi, onDraw }: Props) {
         </div>
       </div>
 
+      <div className={styles.disclaimer} role="note">{t.disclaimerBreak}</div>
       {source === "archive" && (
         <div className={styles.banner}>
           Bu sekme çizdiğin poligonun gerçek NASA FIRMS geçmişini kullanır. Yüzde adımlar benzer görünebilir;
@@ -147,7 +152,7 @@ export function BreakTab({ source, roi, onDraw }: Props) {
             compact
           />
           <div className={styles.grid2}>
-            <Card title="İstatistik testleri (p &lt; 0,05 = kırılma)">
+            <Card title="İstatistik testleri (etki + p; p tek başına yeterli değil)">
               <div className={styles.tblScroll}>
                 <table className={styles.tbl}>
                   <thead>
@@ -175,9 +180,11 @@ export function BreakTab({ source, roi, onDraw }: Props) {
                 </table>
               </div>
               <Hint>
-                p-değeri &lt; 0,05 ise istatistiksel olarak anlamlı kırılma var. Adım yüzdesi çoğu alanda benzer çıkar;
-                ayırt etmek için öncesi/sonrası mutlak ortalamaya bak: ham{" "}
-                {fmt(brk!.reports.raw_filtered.step.pre_mean, 0)} → {fmt(brk!.reports.raw_filtered.step.post_mean, 0)} / ay.
+                {t.lang === "en"
+                  ? "p<0.05 is not a definitive break: autocorrelation can inflate p-values. Read with step % and period means. Pre-VIIRS reference is missing (not zero activity) — comparison reference only. Raw step: "
+                  : "p<0,05 = “kesin kırılma” değildir: otokorelasyon p-değerlerini abartabilir. Adım % ve dönem ortalamalarıyla birlikte okuyun. VIIRS referansı VIIRS öncesi dönemde yoktur (sıfır aktivite değil) — karşılaştırma referansıdır. Ham adım: "}
+                {fmt(brk!.reports.raw_filtered.step.pre_mean, 0)} → {fmt(brk!.reports.raw_filtered.step.post_mean, 0)} / {t.lang === "en" ? "mo" : "ay"}.
+                {brk!.verdict.pvalue_caveat ? ` ${brk!.verdict.pvalue_caveat}` : ""}
               </Hint>
               <AiInsight focus="break" section="stats" label="İstatistik testleri" roi={roi} compact />
             </Card>
@@ -196,12 +203,13 @@ export function BreakTab({ source, roi, onDraw }: Props) {
               <AiInsight focus="break" section="verdict" label="Makine yorumu" roi={roi} compact />
             </Card>
           </div>
-          <Card title="Bu ne gösteriyor">
+          <Card title={t.lang === "en" ? "What this shows" : "Bu ne gösteriyor"}>
             <p className={styles.prose}>
-              VIIRS (375 m) 2012-01-20&apos;de hizmete girdi. Ham MODIS+VIIRS sayımı yapay bir sıçrama üretir; harmonize seri bunu kapatmaya çalışır.
-              Grafik ve tablolar yalnızca çizdiğin ROI içindeki gerçek FIRMS kayıtlarından hesaplanır.
+              {t.lang === "en"
+                ? "VIIRS (375 m) began 2012-01-20. Raw MODIS+VIIRS counts create an artificial jump; the harmonized (VIIRS-equivalent) series tries to close it — model trained on a synthetic benchmark. The VIIRS column is a comparison reference, not ground truth. Hotspot counts are not fire counts or burned area. Charts use only real FIRMS rows inside your ROI."
+                : "VIIRS (375 m) 2012-01-20'de hizmete girdi. Ham MODIS+VIIRS sayımı yapay bir sıçrama üretir; harmonize (VIIRS-eşdeğer) seri bunu kapatmaya çalışır — model sentetik benchmark’ta eğitildi. VIIRS sütunu karşılaştırma referansıdır, mutlak yer-gerçeği değildir. Sıcak nokta sayısı yangın sayısı veya yanmış alan değildir. Grafik ve tablolar yalnızca çizdiğin ROI içindeki gerçek FIRMS kayıtlarından hesaplanır."}
             </p>
-            <AiInsight focus="break" section="explain" label="Bu ne gösteriyor" roi={roi} compact />
+            <AiInsight focus="break" section="explain" label={t.lang === "en" ? "What this shows" : "Bu ne gösteriyor"} roi={roi} compact />
           </Card>
         </>
       ) : !error && !busy && !needRoi && <p className={styles.hint}>Yükleniyor...</p>}

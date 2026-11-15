@@ -9,6 +9,7 @@ AVAIL = {
     "MODIS_SP": (date(2000, 11, 1), date(2026, 8, 31)), "MODIS_NRT": (date(2026, 9, 1), date(2026, 11, 14)),
     "VIIRS_SNPP_SP": (date(2012, 1, 20), date(2026, 7, 31)), "VIIRS_SNPP_NRT": (date(2026, 8, 1), date(2026, 11, 2)),
     "VIIRS_NOAA20_SP": (date(2018, 4, 1), date(2026, 7, 31)), "VIIRS_NOAA20_NRT": (date(2026, 8, 1), date(2026, 11, 14)),
+    "VIIRS_NOAA21_SP": (date(2024, 1, 1), date(2026, 7, 31)), "VIIRS_NOAA21_NRT": (date(2026, 8, 1), date(2026, 11, 14)),
     "LANDSAT_NRT": (date(2022, 6, 20), date(2026, 11, 14)),   # plana girmemeli
 }
 

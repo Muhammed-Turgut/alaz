@@ -10,6 +10,7 @@ import pandas as pd
 
 from src.engine import geometry_h3 as geo
 from src.engine.biomes import biome_codes_from_h3_7
+from src.engine.confidence_policies import PRIMARY_POLICY, policy_current
 from src.engine.diurnal_normalizer import (
     diurnal_factor,
     normalize_frp,
@@ -21,14 +22,15 @@ REQUIRED = ["latitude", "longitude", "ts", "satellite", "instrument", "scan", "t
 
 
 def confidence_ok(df: pd.DataFrame) -> np.ndarray:
-    """Drop low-confidence detections consistently for both sensors.
+    """Production confidence filter (policy A) — do not retune for prettier plots.
 
-    MODIS: confidence >= 30 (i.e. not 'low').  VIIRS classes are mapped
-    low=30 / nominal=65 / high=90, so 'low' is excluded with > 30.
+    MODIS: confidence >= 30.  VIIRS: exclude mapped ``low`` (keep nominal/high).
+    VIIRS class labels are **not** the same scale as MODIS 0–100; mapped
+    scores 30/65/90 are a filter convenience only.  Alternate policies B/C are
+    compared in ``confidence_policies.confidence_filter_sensitivity`` without
+    replacing this main-result mask.
     """
-    conf = pd.to_numeric(df["confidence"], errors="coerce").fillna(65).to_numpy()
-    is_modis = (df["instrument"].astype(str) == "MODIS").to_numpy()
-    return np.where(is_modis, conf >= 30, conf > 30)
+    return policy_current(df)
 
 
 def prepare(df: pd.DataFrame) -> pd.DataFrame:
@@ -44,9 +46,22 @@ def prepare(df: pd.DataFrame) -> pd.DataFrame:
             df[c] = default
     df = geo.add_h3_columns(df)
     df["lst"] = utc_to_lst(df["ts"], df["longitude"].to_numpy())
+    # LST-consistent day/night (local solar hour). NRT vs Standard product daynight
+    # fields can differ in meaning — keep the product value as daynight_raw and do
+    # not silently treat them as interchangeable for science claims.
+    df["daynight_lst"] = np.where((df["lst"] >= 6) & (df["lst"] < 18), "D", "N")
+    if "daynight_raw" not in df.columns:
+        if "daynight" in df.columns:
+            df["daynight_raw"] = df["daynight"].astype(str)
+        else:
+            df["daynight_raw"] = "unknown"
     if "daynight" not in df.columns:
-        df["daynight"] = np.where((df["lst"] >= 6) & (df["lst"] < 18), "D", "N")
+        df["daynight"] = df["daynight_lst"]
     df["daynight"] = df["daynight"].astype(str)
+    # Unknown product daynight → use LST for model features only
+    unk = df["daynight"].isin(["", "nan", "None", "unknown", "UNKNOWN"])
+    if unk.any():
+        df.loc[unk, "daynight"] = df.loc[unk, "daynight_lst"]
     local = df["ts"] + pd.to_timedelta(df["longitude"].to_numpy() / 15.0, unit="h")
     df["ldate"] = local.dt.floor("D")
     df["year"] = df["ts"].dt.year
@@ -59,4 +74,5 @@ def prepare(df: pd.DataFrame) -> pd.DataFrame:
     df["frp_norm"] = normalize_frp(df["frp"].to_numpy(), df["lst"].to_numpy(), df["lst_ref"].to_numpy())
     df["biome"] = biome_codes_from_h3_7(df["h3_7"].to_numpy())
     df["conf_ok"] = confidence_ok(df)
+    df["conf_policy"] = PRIMARY_POLICY
     return df

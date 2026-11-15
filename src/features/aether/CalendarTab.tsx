@@ -5,6 +5,7 @@ import { calendarHoverText, drawCalendar, envelopeChart, type HeatmapGeom } from
 import { usePrefs } from "@/lib/preferences";
 import type { AreaCalendarResult, CalendarPayload, LatLng, Source } from "./types";
 import { AiInsight } from "./AiInsight";
+import { useT } from "@/lib/i18n";
 import { Card, ChartBox, EmptyRoi, Hint, Seg } from "./ui";
 import styles from "./aether.module.css";
 
@@ -27,6 +28,7 @@ function yearsBetween(a: number, b: number): number[] {
 }
 
 export function CalendarTab({ visible, source, roi, onDraw }: Props) {
+  const t = useT();
   const [series, setSeries] = useState<"harmonized" | "raw">("harmonized");
   const [cal, setCal] = useState<CalendarPayload | null>(null);
   const [area, setArea] = useState<AreaCalendarResult | null>(null);
@@ -60,7 +62,7 @@ export function CalendarTab({ visible, source, roi, onDraw }: Props) {
     if (source === "live") {
       setError(
         "Canlı FIRMS yalnızca son ~24 saat (küresel) — yanma takvimi yok. "
-        + "Gerçek arşiv (TR) + ROI kullan. Tarihsel takvim Türkiye pilot kapsamasındadır.",
+        + "Gerçek arşiv + ROI kullan. TR yerel disk hızlı; dünya geneli = on-demand FIRMS API.",
       );
       return () => { live = false; };
     }
@@ -155,10 +157,11 @@ export function CalendarTab({ visible, source, roi, onDraw }: Props) {
           />
         </div>
       </div>
+      <div className={styles.disclaimer} role="note">{t.disclaimerCalendar}</div>
 
       {needRoi && (
         <EmptyRoi
-          message="Takvim için ROI çiz veya enlem/boylam gir (Türkiye pilot arşivi, ≤ ~120.000 km²)."
+          message="Takvim için ROI çiz veya enlem/boylam gir (dünya geneli, ≤ ~120.000 km²)."
           onDraw={onDraw}
         />
       )}
@@ -218,8 +221,8 @@ export function CalendarTab({ visible, source, roi, onDraw }: Props) {
       )}
       {source === "archive" && meta && (
         <Hint>
-          Birincil seri <b>VIIRS-eşdeğer (harmonize)</b> — sensör farkı giderilmiş zaman serisi.
-          Ham, MODIS/VIIRS’i ayrı tutar (karşılaştırma).
+          Birincil seri <b>VIIRS-eşdeğer (harmonize)</b> — sensör farkını azaltmak için; model sentetik
+          benchmark’ta eğitildi, VIIRS mutlak yer-gerçeği değil. Ham, MODIS/VIIRS’i ayrı tutar (karşılaştırma).
         </Hint>
       )}
 
@@ -235,7 +238,7 @@ export function CalendarTab({ visible, source, roi, onDraw }: Props) {
             <div><b>{vs.percentile != null ? `%${vs.percentile.toFixed(0)}` : "-"}</b><span>yüzdelik</span></div>
           </div>
           <Hint>
-            Seçilen alanda bu ayın yakma etkinliği, aynı ayın tarihsel medyanına göre nerede.
+            Bu ayın sıcak nokta tespit toplamı, aynı ayın tarihsel medyanına göre nerede (yangın sayısı ≠ tespit).
             {vs.historical_p10 != null ? ` Tarihsel P10–P90: ${vs.historical_p10} – ${vs.historical_p90}.` : ""}
           </Hint>
           <AiInsight focus="calendar" section="month_vs_median" label="Bu ay vs medyan" roi={roi} compact />
@@ -309,17 +312,19 @@ export function CalendarTab({ visible, source, roi, onDraw }: Props) {
       )}
 
       {area?.local_validation && Object.keys(area.local_validation).length > 0 && (
-        <Card title="Yerel doğrulama (MODIS → VIIRS, örtüşen aylar)">
+        <Card title="Yerel doğrulama (MODIS → VIIRS referansı, örtüşen aylar)">
           <Hint>
             RMSE ham {Number(area.local_validation.rmse_raw).toFixed(1)}
             {" → "}harmonize {Number(area.local_validation.rmse_harmonized).toFixed(1)}
             {" · "}göreli sapma ham %{Number(area.local_validation.relative_bias_raw_pct).toFixed(1)}
             {" → "}harmonize %{Number(area.local_validation.relative_bias_harmonized_pct).toFixed(1)}
             {area.local_validation.n ? ` · n=${area.local_validation.n} ay` : ""}
+            {" · "}VIIRS karşılaştırma referansıdır (ground truth değil).
           </Hint>
-          {(area.local_validation.rmse_reduction_pct ?? 0) < 0 && (
+          {Number(area.local_validation.rmse_reduction_pct ?? 0) < 0 && (
             <div className={styles.banner}>
-              Harmonize model bu alanda VIIRS&apos;e yaklaştırmıyor. Ham takvim karşılaştırma için; birincil öneri yine VIIRS-eşdeğer etiketli seridir.
+              Bu ROI’de iyileşme yok — takvim için <b>Ham</b> seriyi tercih et
+              (üstteki seçiciyi Ham yap). VIIRS-eşdeğer varsayılanı burada uygun değil.
             </div>
           )}
           <AiInsight focus="calendar" section="validation" label="Yerel doğrulama" roi={roi} compact />

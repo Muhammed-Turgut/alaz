@@ -66,6 +66,30 @@
   margin-left: auto;
 }
 
+.langSwitch {
+  display: flex;
+  gap: 0;
+  margin-right: var(--space-2);
+  border: 2px solid color-mix(in srgb, var(--palette-cream) 35%, transparent);
+}
+
+.langBtn {
+  padding: 6px 10px;
+  font-family: var(--font-display);
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  color: var(--palette-cream);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+
+.langOn {
+  color: var(--palette-black);
+  background: var(--palette-cream);
+  font-weight: 700;
+}
+
 @media (max-width: 720px) {
   .sourceBtn {
     font-size: 11px;

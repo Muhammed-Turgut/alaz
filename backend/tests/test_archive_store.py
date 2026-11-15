@@ -57,7 +57,11 @@ def test_store_rejects_oversized_and_outside(tmp_path, monkeypatch):
     (root / "progress.json").write_text('{"state":"running","done_chunks":1,"total_chunks":10}')
     (root / "raw").mkdir()
     store = ArchiveStore("tr")
-    with pytest.raises(ValueError, match="kapsama dışında"):
+    assert store.contains_bbox(28.0, 36.0, 29.0, 37.0) is True
+    assert store.contains_bbox(20.0, 30.0, 21.0, 31.0) is False
+    # Straddling the edge is not "fully inside" → remote path
+    assert store.contains_bbox(24.0, 35.8, 26.0, 36.5) is False
+    with pytest.raises(ValueError, match="kapsam[ıi] dışında"):
         store.assert_inside_coverage(20.0, 30.0, 21.0, 31.0)
     with pytest.raises(ValueError, match="çok büyük"):
         store.assert_area_limit(25.5, 35.8, 45.0, 42.3)

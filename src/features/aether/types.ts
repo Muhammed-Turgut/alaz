@@ -166,7 +166,16 @@ export interface BreakReport {
 export interface BreakPayload {
   region: string;
   reports: Record<"raw_all" | "raw_filtered" | "harmonized" | "truth", BreakReport>;
-  verdict: { notes: string[]; raw_break_at_transition: boolean; harmonized_step_eliminated: boolean };
+  verdict: {
+    notes: string[];
+    raw_break_at_transition: boolean;
+    harmonized_step_eliminated: boolean;
+    pvalue_caveat?: string;
+  };
+  empty?: boolean;
+  message?: string;
+  meta?: AreaCalendarResult["meta"];
+  local_validation?: Record<string, number | string | boolean | null>;
 }
 
 export interface CalendarPayload {
@@ -221,11 +230,18 @@ export interface AreaCalendarResult {
     model?: string;
     model_note?: string;
     counts?: { raw_all: number; raw_modis: number; raw_viirs: number; static_removed: number };
+    product_composition?: Record<string, number>;
+    product_kind_counts?: Record<string, number>;
+    satellites?: Record<string, number>;
+    nrt_tail_note?: string | null;
+    empty_reason?: string | null;
+    times_utc?: boolean;
+    timeline_markers?: { id: string; date: string; label: string }[];
   };
   calendar?: CalendarPayload;
   month_year?: MonthYearMatrix;
   current_month_vs_median?: MonthVsMedian;
-  local_validation?: Record<string, number>;
+  local_validation?: Record<string, number | string | boolean | null>;
 }
 
 export interface ArchiveStatus {
@@ -240,12 +256,99 @@ export interface ArchiveStatus {
   max_area_km2?: number;
   rows_cached?: number;
   partial?: boolean;
+  /** FIRMS_MAP_KEY present — on-demand global ROI outside local TR disk. */
+  remote_api_configured?: boolean;
+  remote_max_years?: number;
+  global_roi?: boolean;
+  local_coverage_note?: string;
+}
+
+/** Archive multi-year FIRMS hotspot density (H3 res-7 polygons). */
+export interface DensityPoint {
+  lat: number;
+  lon: number;
+  n: number;
+  frp_sum: number;
+  w: number;
+  h3: string;
+  /** [[lat, lon], ...] ring for polygon fill. */
+  boundary?: LatLng[];
+  platforms?: Record<string, number>;
+  instruments?: Record<string, number>;
+}
+
+export interface DensityLegendBin {
+  level: string;
+  weight?: number;
+  min_n?: number;
+  max_n?: number;
+  approx_n_per_cell?: number;
+  label_tr: string;
+  label_en: string;
+}
+
+export interface AreaDensityResult {
+  empty: boolean;
+  message?: string;
+  /** Effective years used for window/legend (may be capped for remote ROI). */
+  years: number;
+  requested_years?: number;
+  effective_years?: number;
+  window_start?: string | null;
+  window_end?: string | null;
+  year_note?: string | null;
+  instrument: string;
+  window?: [string | null, string | null];
+  archive_span?: [string | null, string | null];
+  n_detections?: number;
+  n_raw_in_window?: number;
+  excluded_lowconf_or_static?: number;
+  n_cells?: number;
+  n_max_per_cell?: number;
+  cell_area_km2_approx?: number;
+  aggregation?: string;
+  render?: "h3_polygon" | "kernel_heatmap";
+  meaning?: string;
+  points: DensityPoint[];
+  legend: {
+    title_tr: string;
+    title_en: string;
+    unit_tr: string;
+    unit_en: string;
+    not_tr: string;
+    not_en: string;
+    window?: [string | null, string | null];
+    n_max_per_cell?: number;
+    n_total?: number;
+    render?: string;
+    bins: DensityLegendBin[];
+  };
+  meta?: AreaCalendarResult["meta"] & {
+    partial?: boolean;
+    done_chunks?: number;
+    total_chunks?: number;
+    failed_chunks?: number;
+    chunks_fetched_now?: number;
+    chunks_from_cache?: number;
+    truncated?: boolean;
+    local_archive?: boolean;
+    history_years_cap?: number;
+    first_download?: boolean;
+    cache_complete?: boolean;
+  };
 }
 
 export interface DiurnalModel {
   params: { peak_hour: number; sigma_hours: number; floor: number; day_reference_hour: number; night_reference_hour: number; clip: number[] };
   curve: { lst: number[]; relative_intensity: number[] };
-  overpass_drift: { years: number[]; Terra: number[]; Aqua: number[]; SNPP: number[]; NOAA20: number[] };
+  overpass_drift: {
+    years: number[];
+    Terra: number[];
+    Aqua: number[];
+    SNPP: number[];
+    NOAA20: number[];
+    NOAA21?: number[];
+  };
 }
 
 interface TargetMetrics {
@@ -272,7 +375,12 @@ export interface StaticFilterStats {
 }
 export interface ValidationPayload {
   kappa: number;
-  regions: Record<string, { holdout_2022_2026: ValidationBlock; counterfactual_2001_2011: ValidationBlock }>;
+  regions: Record<string, {
+    synthetic_holdout_2022_2026?: ValidationBlock;
+    synthetic_counterfactual_2001_2011?: ValidationBlock;
+    holdout_2022_2026?: ValidationBlock;
+    counterfactual_2001_2011?: ValidationBlock;
+  }>;
   static_filter: Record<string, StaticFilterStats | Record<string, number>>;
 }
 

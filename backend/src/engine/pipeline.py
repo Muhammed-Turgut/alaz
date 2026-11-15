@@ -16,9 +16,25 @@ from src.engine.static_filter import build_persistence_catalog, tag_static
 
 log = logging.getLogger("aether.pipeline")
 
+# Synthetic-benchmark year blocks only — NOT real NASA FIRMS hold-out.
 TRAIN_YEARS = (2012, 2019)
 CALIB_YEARS = (2020, 2021)
 TEST_YEARS = (2022, 2026)
+EVAL_KIND = "synthetic_benchmark"
+
+
+def assert_year_blocks_disjoint(train_years=TRAIN_YEARS, calib_years=CALIB_YEARS, test_years=TEST_YEARS):
+    """Prevent accidental leakage: test years must not overlap train or calibration."""
+    def span(lo, hi):
+        return set(range(int(lo), int(hi) + 1))
+    tr, ca, te = span(*train_years), span(*calib_years), span(*test_years)
+    if tr & ca:
+        raise ValueError(f"train/calib year overlap: {tr & ca}")
+    if tr & te:
+        raise ValueError(f"train/test year overlap: {tr & te}")
+    if ca & te:
+        raise ValueError(f"calib/test year overlap: {ca & te}")
+    return True
 
 
 def prepare_region(data: dict):
@@ -37,7 +53,13 @@ def _years(df, lo, hi):
 
 
 def train_harmonizer(regions: dict, progress=None) -> HarmonizerModel:
-    """regions: {region_id: prepared df}.  Returns a fitted model (train/calib/test by year)."""
+    """regions: {region_id: prepared df}.  Returns a fitted model (train/calib/test by year).
+
+    Year blocks are **synthetic-benchmark** periods only. Do not present the
+    2022–2026 hold-out as a real NASA FIRMS validation result.
+    Geographic generalization is not claimed (Turkey / sim regions only).
+    """
+    assert_year_blocks_disjoint()
     mt_parts, snpp_counts = [], []
     for rid, df in regions.items():
         ok = df[df["conf_ok"] & ~df["is_static"]]
@@ -54,6 +76,11 @@ def train_harmonizer(regions: dict, progress=None) -> HarmonizerModel:
     train = _years(mt, *TRAIN_YEARS)
     calib = _years(mt, *CALIB_YEARS)
     test = _years(mt, *TEST_YEARS)
+    # Hard guard: no test-year rows in train or calib
+    if set(train["year"]).intersection(set(range(TEST_YEARS[0], TEST_YEARS[1] + 1))):
+        raise ValueError("test years leaked into training split")
+    if set(calib["year"]).intersection(set(range(TEST_YEARS[0], TEST_YEARS[1] + 1))):
+        raise ValueError("test years leaked into calibration split")
     if progress:
         progress(f"matchups train={len(train):,} calib={len(calib):,} test={len(test):,}")
     model = HarmonizerModel().fit(train, calib, test)
@@ -66,7 +93,13 @@ def train_harmonizer(regions: dict, progress=None) -> HarmonizerModel:
     model.matchup_summary = {
         "n_matchups": int(len(mt)), "n_train": int(len(train)), "n_calib": int(len(calib)), "n_test": int(len(test)),
         "train_years": TRAIN_YEARS, "calib_years": CALIB_YEARS, "test_years": TEST_YEARS,
-        "frac_modis_with_viirs_counterpart": float((mt["n_eq"] > 0).mean()),
+        "evaluation_kind": EVAL_KIND,
+        "evaluation_note": (
+            "Train/calib/test year blocks apply to the synthetic benchmark only. "
+            "Real FIRMS archive checks are a separate monthly VIIRS reference comparison."
+        ),
+        "geographic_generalization": "not_validated",
+        "frac_modis_with_viirs_counterpart": float((mt["n_eq"] > 0).mean()) if len(mt) else 0.0,
     }
     return model
 
@@ -93,8 +126,15 @@ def attach_harmonized(df: pd.DataFrame, model: HarmonizerModel, n_ops_modis=None
     pred = pd.DataFrame(index=sub.index)
     if is_modis.any():
         pred = model.predict(sub[is_modis])
-    nm = None if n_ops_modis is None else n_ops_modis
-    h = model.harmonize(sub, pred if len(pred) else None, nm, n_ops_viirs)
+    # n_ops may be aligned to the full df; harmonize() expects sub length.
+    nm = nv = None
+    if n_ops_modis is not None:
+        arr = np.asarray(n_ops_modis, dtype=float)
+        nm = arr[ok] if arr.ndim and len(arr) == len(df) else arr
+    if n_ops_viirs is not None:
+        arr = np.asarray(n_ops_viirs, dtype=float)
+        nv = arr[ok] if arr.ndim and len(arr) == len(df) else arr
+    h = model.harmonize(sub, pred if len(pred) else None, nm, nv)
     df.loc[sub.index, ["h_w", "h_sd", "h_lo", "h_hi"]] = h.to_numpy()
     if len(pred):
         df.loc[pred.index, "frp_harm"] = pred["frp_p50"].to_numpy()

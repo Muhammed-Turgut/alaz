@@ -19,7 +19,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse, PlainTextResponse
 
 from src.api.schemas import (
-    AreaCalendarRequest, AreaScopeRequest, AreaSeriesRequest,
+    AreaCalendarRequest, AreaDensityRequest, AreaScopeRequest, AreaSeriesRequest,
     BriefingRequest, ExportHotspotsRequest, HarmonizeRequest, HealthResponse,
     InterpretRequest, ROIRequest,
 )
@@ -286,6 +286,9 @@ def _area_call(fn, req):
         return fn()
     except FileNotFoundError as exc:
         raise HTTPException(503, str(exc)) from exc
+    except RuntimeError as exc:
+        # e.g. missing FIRMS_MAP_KEY for global (non-TR) ROI
+        raise HTTPException(503, str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
 
@@ -320,6 +323,18 @@ def area_break(req: AreaScopeRequest):
     )
 
 
+@app.post("/api/area-density")
+def area_density(req: AreaDensityRequest):
+    """ROI + son N yıl FIRMS hotspot tespit yoğunluğu (ısı haritası noktaları)."""
+    return _area_call(
+        lambda: _st().area_density(
+            polygon=req.polygon, bbox=req.bbox, years=req.years,
+            instrument=req.instrument, force=req.force,
+        ),
+        req,
+    )
+
+
 @app.post("/api/briefing")
 def briefing(req: BriefingRequest):
     start, end = _date(req.start, "start"), _date(req.end, "end")
@@ -330,8 +345,11 @@ def briefing(req: BriefingRequest):
             req.source, rid, start, end, req.polygon, req.days,
             _bbox(",".join(map(str, req.bbox))) if req.bbox else None,
             audience=req.audience or "acil",
+            lang=req.lang or "tr",
         )
     except FileNotFoundError as exc:
+        raise HTTPException(503, str(exc)) from exc
+    except RuntimeError as exc:
         raise HTTPException(503, str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
@@ -368,6 +386,7 @@ def interpret(req: InterpretRequest):
             focus=req.focus,
             section=req.section or "overview",
             question=req.question,
+            lang=req.lang or "tr",
         )
     except FileNotFoundError as exc:
         raise HTTPException(503, str(exc)) from exc

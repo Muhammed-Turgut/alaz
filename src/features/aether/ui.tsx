@@ -45,8 +45,8 @@ export function Card({ title, children, className }: { title?: string; children:
   );
 }
 
-export function Badge({ tone, children }: { tone?: "ok" | "warn" | "bad"; children: ReactNode }) {
-  return <span className={cx(styles.badge, tone && styles["badge_" + tone])}>{children}</span>;
+export function Badge({ tone, children, title }: { tone?: "ok" | "warn" | "bad"; children: ReactNode; title?: string }) {
+  return <span className={cx(styles.badge, tone && styles["badge_" + tone])} title={title}>{children}</span>;
 }
 
 export function Hint({ children }: { children: ReactNode }) {

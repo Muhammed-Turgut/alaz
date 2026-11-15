@@ -46,11 +46,13 @@ TX_BUDGET = 4500      # NASA sınırı 5000 / 10 dk; canlı harita istekleri iç
 HEADER = b"latitude,longitude"
 
 # sensör -> (bilim kalitesinde arşiv ürünü, yakın-gerçek-zamanlı ürün). Arşiv ürünü birkaç ay geriden gelir;
-# aradaki son aylar NRT ürününden tamamlanır. NOAA-21 motor tarafından henüz desteklenmediği için alınmaz.
+# aradaki son aylar NRT ürününden tamamlanır (geçici NRT uç dönem; Standard gelince değişebilir).
+# SNPP tarihsel Standard/NRT arşivi korunur; canlı NRT akışında SNPP kullanılmaz (bkz. firms_client).
 PRODUCTS = {
     "MODIS": ("MODIS_SP", "MODIS_NRT"),
     "VIIRS_SNPP": ("VIIRS_SNPP_SP", "VIIRS_SNPP_NRT"),
     "VIIRS_NOAA20": ("VIIRS_NOAA20_SP", "VIIRS_NOAA20_NRT"),
+    "VIIRS_NOAA21": ("VIIRS_NOAA21_SP", "VIIRS_NOAA21_NRT"),
 }
 
 

@@ -33,7 +33,7 @@ class DetectionIn(BaseModel):
     longitude: float = Field(..., ge=-180, le=180)
     acq_date: str = Field(..., description="YYYY-MM-DD")
     acq_time: int = Field(..., ge=0, le=2359, description="UTC HHMM")
-    satellite: str = Field(..., description="Terra | Aqua | SNPP | NOAA20")
+    satellite: str = Field(..., description="Terra | Aqua | SNPP | NOAA20 | NOAA21")
     frp: float = Field(..., ge=0)
     scan: Optional[float] = Field(None, gt=0, description="along-scan pixel size, km")
     track: Optional[float] = Field(None, gt=0, description="along-track pixel size, km")
@@ -58,6 +58,7 @@ class BriefingRequest(BaseModel):
     days: int = Field(1, ge=1, le=7)
     bbox: Optional[list[float]] = None
     audience: Audience = "acil"
+    lang: Literal["tr", "en"] = "tr"
 
 
 class ExportHotspotsRequest(BaseModel):
@@ -124,11 +125,24 @@ class AreaSeriesRequest(AreaScopeRequest):
     freq: Literal["monthly", "annual"] = "monthly"
 
 
+class AreaDensityRequest(AreaScopeRequest):
+    """ROI içinde son N yıl FIRMS hotspot tespit yoğunluğu (H3 hücreleri)."""
+    years: int = Field(
+        5, ge=1, le=25,
+        description=(
+            "Requested years back from latest ROI timestamp. "
+            "Local TR archive may use up to 15+; remote Area API is capped (see REMOTE_MAX_YEARS / effective_years)."
+        ),
+    )
+    instrument: Literal["all", "MODIS", "VIIRS"] = "all"
+
+
 class InterpretRequest(AreaScopeRequest):
     """DeepSeek AI bakışı — ROI sayı özeti + odak sekmesi + tablo bölümü."""
     focus: Literal["break", "calendar", "model", "briefing"] = "break"
     section: str = Field("overview", max_length=64, description="Tablo/kart kimliği")
     question: Optional[str] = Field(None, max_length=500)
+    lang: Literal["tr", "en"] = "tr"
 
 
 class HealthResponse(BaseModel):

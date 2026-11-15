@@ -1,6 +1,7 @@
 import { useState } from "react";
 
 import { Button } from "@/components/ui/Button";
+import { useT } from "@/lib/i18n";
 import { api } from "./api";
 import { Markdown } from "./Markdown";
 import type { LatLng } from "./types";
@@ -40,6 +41,8 @@ function AiIcon({ size = 28 }: { size?: number }) {
 }
 
 export function AiInsight({ focus, section, label, roi, disabledReason, compact }: Props) {
+  const t = useT();
+  const en = t.lang === "en";
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [markdown, setMarkdown] = useState("");
@@ -53,7 +56,7 @@ export function AiInsight({ focus, section, label, roi, disabledReason, compact 
 
   const run = async () => {
     if (!roi || roi.length < 3) {
-      setError("Önce haritada bir poligon çiz.");
+      setError(en ? "Draw a polygon on the map first." : "Önce haritada bir poligon çiz.");
       return;
     }
     setBusy(true);
@@ -65,11 +68,12 @@ export function AiInsight({ focus, section, label, roi, disabledReason, compact 
         focus,
         section,
         question: question.trim() || undefined,
+        lang: t.lang,
       });
       setUsed(r.used_numbers ?? null);
       if (r.empty) {
         setMarkdown("");
-        setError(r.message || "Seçilen alanda veri yok.");
+        setError(r.message || (en ? "No data in selected area." : "Seçilen alanda veri yok."));
         return;
       }
       if (r.error) {

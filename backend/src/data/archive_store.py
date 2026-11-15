@@ -24,13 +24,26 @@ _DEFAULT_SAT = {
     "MODIS_SP": "Terra", "MODIS_NRT": "Terra",
     "VIIRS_SNPP_SP": "SNPP", "VIIRS_SNPP_NRT": "SNPP",
     "VIIRS_NOAA20_SP": "NOAA20", "VIIRS_NOAA20_NRT": "NOAA20",
+    "VIIRS_NOAA21_SP": "NOAA21", "VIIRS_NOAA21_NRT": "NOAA21",
 }
 _SAT_MAP = {
     "T": "Terra", "TERRA": "Terra", "A": "Aqua", "AQUA": "Aqua",
     "N": "SNPP", "NPP": "SNPP", "SUOMI NPP": "SNPP", "SNPP": "SNPP",
     "N20": "NOAA20", "NOAA-20": "NOAA20", "NOAA20": "NOAA20", "1": "NOAA20", "J1": "NOAA20",
+    "N21": "NOAA21", "NOAA-21": "NOAA21", "NOAA21": "NOAA21", "2": "NOAA21", "J2": "NOAA21",
 }
 _VIIRS_CONF = {"l": 30, "low": 30, "n": 65, "nominal": 65, "h": 90, "high": 90}
+
+
+def product_kind(source: str) -> str:
+    if not source or not isinstance(source, str):
+        return "unknown"
+    s = source.upper()
+    if s.endswith("_SP"):
+        return "standard"
+    if s.endswith("_NRT"):
+        return "nrt"
+    return "unknown"
 
 # Seçilebilir alan üst sınırı (yaklaşık km²). Kota alan-bağımsız; sınır performans + UX için.
 # ~3°×3° civarı; daha büyük ROI için AI/brifing özet yolu kullanılır.
@@ -108,8 +121,17 @@ def standardize_raw(raw: pd.DataFrame, source: str) -> pd.DataFrame:
     else:
         mapped = conf.astype(str).str.lower().map(_VIIRS_CONF)
         out["confidence"] = mapped.fillna(pd.to_numeric(conf, errors="coerce"))
-    out["daynight"] = raw["daynight"].astype(str) if "daynight" in raw.columns else "D"
+    if "daynight" in raw.columns:
+        out["daynight"] = raw["daynight"].astype(str)
+    else:
+        out["daynight"] = "unknown"
+    out["daynight_raw"] = out["daynight"]
     out["firms_source"] = source
+    out["product_kind"] = product_kind(source)
+    if "version" in raw.columns:
+        out["product_version"] = raw["version"].astype(str)
+    else:
+        out["product_version"] = "unknown"
     if "type" in raw.columns:
         out["nasa_type"] = pd.to_numeric(raw["type"], errors="coerce")
     else:
@@ -155,6 +177,7 @@ class ArchiveStore:
             "max_area_km2": MAX_AREA_KM2,
             "rows_cached": 0 if self._df is None else int(len(self._df)),
             "partial": prog.get("state") != "done",
+            "archive_products": area.get("products") or {},
         }
 
     def coverage_bbox(self) -> tuple[float, float, float, float]:
@@ -202,13 +225,26 @@ class ArchiveStore:
             log.info("arşiv %s yüklendi: %d satır (key=%s)", self.area_id, len(df), key)
             return df
 
+    def contains_bbox(self, west: float, south: float, east: float, north: float) -> bool:
+        """True if the query box lies fully inside the local disk archive coverage."""
+        try:
+            cw, cs, ce, cn = self.coverage_bbox()
+        except FileNotFoundError:
+            return False
+        return (
+            west >= cw - 1e-6 and east <= ce + 1e-6
+            and south >= cs - 1e-6 and north <= cn + 1e-6
+        )
+
     def assert_inside_coverage(self, west: float, south: float, east: float, north: float) -> None:
+        if self.contains_bbox(west, south, east, north):
+            return
         cw, cs, ce, cn = self.coverage_bbox()
-        if west < cw - 1e-6 or east > ce + 1e-6 or south < cs - 1e-6 or north > cn + 1e-6:
-            raise ValueError(
-                f"Seçilen alan kapsama dışında. Kapsama: "
-                f"W{cw} S{cs} E{ce} N{cn}."
-            )
+        raise ValueError(
+            f"Seçilen alan yerel arşiv kapsamı dışında. Yerel kapsama: "
+            f"W{cw} S{cs} E{ce} N{cn}. "
+            f"Kapsama dışı ROI için sistem FIRMS Area API (uzaktan) kullanır."
+        )
 
     def assert_area_limit(self, west: float, south: float, east: float, north: float) -> float:
         km2 = bbox_area_km2(west, south, east, north)
@@ -245,8 +281,20 @@ class ArchiveStore:
         km2 = self.assert_area_limit(west, south, east, north)
 
         df = self.load(force=force)
+        status = self.status()
+        empty_reason = None
         if df.empty:
-            meta = {**self.status(), "area_km2": km2, "rows": 0, "dropped_by_filter": 0}
+            if status.get("state") in ("missing", "unknown") or int(status.get("done_chunks") or 0) == 0:
+                empty_reason = "archive_not_ready"
+            elif status.get("partial"):
+                empty_reason = "archive_partial_no_rows"
+            else:
+                empty_reason = "no_detections"
+            meta = {
+                **status, "area_km2": km2, "rows": 0, "dropped_by_filter": 0,
+                "empty_reason": empty_reason, "times_utc": True,
+                "product_composition": {}, "nrt_tail_note": None,
+            }
             return df.copy(), meta
 
         m = (
@@ -262,8 +310,41 @@ class ArchiveStore:
             )
             sub = sub.loc[inside]
 
+        composition: dict[str, int] = {}
+        kind_counts: dict[str, int] = {}
+        sat_counts: dict[str, int] = {}
+        if len(sub):
+            if "firms_source" in sub.columns:
+                composition = {str(k): int(v) for k, v in sub["firms_source"].value_counts().items()}
+            if "product_kind" in sub.columns:
+                kind_counts = {str(k): int(v) for k, v in sub["product_kind"].value_counts().items()}
+            if "satellite" in sub.columns:
+                sat_counts = {str(k): int(v) for k, v in sub["satellite"].value_counts().items()}
+
+        nrt_rows = int(kind_counts.get("nrt", 0))
+        std_rows = int(kind_counts.get("standard", 0))
+        unk_rows = int(kind_counts.get("unknown", 0))
+        nrt_tail_note = None
+        if nrt_rows and std_rows:
+            nrt_tail_note = (
+                "ROI mixes Standard (science-quality) and NRT rows. "
+                "NRT tail is provisional and may be replaced by Standard later."
+            )
+        elif nrt_rows and not std_rows:
+            nrt_tail_note = "ROI uses NRT products only for the selected span (provisional)."
+        elif unk_rows and not (nrt_rows or std_rows):
+            nrt_tail_note = "Product kind unknown for archived rows — not assumed Standard or NRT."
+
+        if len(sub) == 0:
+            empty_reason = "no_detections"
+
+        area_products = {}
+        try:
+            area_products = _area_json(self.root).get("products") or {}
+        except FileNotFoundError:
+            area_products = {}
         meta = {
-            **self.status(),
+            **status,
             "area_km2": round(km2, 1),
             "query_bbox": {"west": west, "south": south, "east": east, "north": north},
             "rows": int(len(sub)),
@@ -272,5 +353,13 @@ class ArchiveStore:
                 str(sub["ts"].min().date()) if len(sub) else None,
                 str(sub["ts"].max().date()) if len(sub) else None,
             ],
+            "empty_reason": empty_reason,
+            "times_utc": True,
+            "product_composition": composition,
+            "product_kind_counts": kind_counts,
+            "satellites": sat_counts,
+            "nrt_tail_note": nrt_tail_note,
+            "archive_products": area_products,
+            "data_source": "NASA FIRMS archive (independent prototype; not a NASA product)",
         }
         return sub.reset_index(drop=True), meta

@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/Button";
 import { APP_CONFIG, type ConfidenceKey } from "./live/config";
 import type { LiveFires } from "./live/useLiveFires";
 import type { ArchiveStatus, LatLng, Source } from "./types";
+import { Glossary } from "./Glossary";
 import { viz } from "./viz";
 import styles from "./aether.module.css";
 
@@ -134,7 +135,7 @@ export function Sidebar(p: Props) {
       <section className={styles.ctl}>
         <h4>Veri kaynağı</h4>
         <p className={styles.hint}>
-          Kaynağı üst sağdan seç. <b>Tarihsel yanma takvimi:</b> Türkiye pilot arşivi.
+          Kaynağı üst sağdan seç. <b>Tarihsel arşiv:</b> dünya geneli ROI (TR = yerel disk; dışı FIRMS API).
           {" "}
           <b>Canlı harita:</b> dünya geneli son 24 saat FIRMS.
           {p.source === "archive"
@@ -166,11 +167,14 @@ export function Sidebar(p: Props) {
           <h4>Gerçek arşiv</h4>
           <div className={styles.metaBox}>
             {p.archive?.available
-              ? `${p.archive.name ?? "Türkiye"}\n${p.archive.partial ? "indiriliyor" : "hazır"} · ${p.archive.done_chunks}/${p.archive.total_chunks} dilim\nmaks. alan ≈ ${(p.archive.max_area_km2 ?? MAX_ROI_KM2).toLocaleString("tr-TR")} km²`
-              : "Arşiv henüz yok veya yüklenemedi."}
+              ? `${p.archive.name ?? "Türkiye"} (yerel)\n${p.archive.partial ? "indiriliyor" : "hazır"} · ${p.archive.done_chunks}/${p.archive.total_chunks} dilim\nmaks. alan ≈ ${(p.archive.max_area_km2 ?? MAX_ROI_KM2).toLocaleString("tr-TR")} km²\nküresel ROI: ${p.archive.remote_api_configured ? "API hazır" : "MAP_KEY yok"}${p.archive.remote_max_years ? ` · uzaktan ≤${p.archive.remote_max_years}y` : ""}`
+              : p.archive?.remote_api_configured
+                ? `Yerel TR yok — küresel ROI FIRMS API ile (≤${p.archive.remote_max_years ?? 10} yıl)`
+                : "Yerel arşiv yok; küresel ROI için FIRMS_MAP_KEY gerekli."}
           </div>
           <p className={styles.hint}>
-            Haritada poligon çiz veya aşağıda enlem/boylam/yarıçap gir — değer değişince ROI otomatik uygulanır.
+            Haritada <b>dünya geneli</b> poligon çiz veya enlem/boylam/yarıçap gir.
+            Türkiye yerel disk arşivi varsa o ROI hızlı yüklenir; dışı on-demand FIRMS API (MAP_KEY gerekir).
           </p>
         </section>
       )}
@@ -240,8 +244,11 @@ export function Sidebar(p: Props) {
         </p>
       </section>
 
+      <Glossary />
+
       <p className={styles.foot}>
-        Ham sayımlar her platformun tespitlerini içerir. Harmonize değerler, platform başına VIIRS-375 m eşdeğeri sıcak noktalardır; kalıcı endüstriyel / volkanik kaynaklar çıkarılmıştır.
+        Hotspot ≠ yangın sayısı ≠ yanmış alan. Harmonize: VIIRS-eşdeğer ölçek (sentetik benchmark eğitimi;
+        gerçek arşivde aylık MODIS→VIIRS kontrolü). VIIRS mutlak yer-gerçeği değildir. Brifing = ön tarama, talimat değil.
       </p>
     </aside>
   );

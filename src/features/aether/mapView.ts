@@ -43,9 +43,29 @@ const EMPTY: Fc = { type: "FeatureCollection", features: [] };
 
 const HEX_LAYERS = ["hex-fill", "hex-dots"];
 const HEX_VISUAL = ["hex-fill", "hex-line", "hex-dots"];
-const FIRE_LAYERS = ["fire-clusters", "fire-cluster-count", "fire-points"];
+/** Cluster + individual detection points (live “points” style). */
+const FIRE_POINT_LAYERS = ["fire-clusters", "fire-cluster-count", "fire-points"];
+/** Kernel density of FIRMS hotspot detections (live “heatmap” style). */
+const FIRE_HEAT_LAYERS = ["fire-heatmap"];
+const FIRE_LAYERS = [...FIRE_POINT_LAYERS, ...FIRE_HEAT_LAYERS];
 const ALL_LAYERS = [...HEX_VISUAL, ...FIRE_LAYERS, "box-line", "sel-line", "sel-dot", "roi-fill", "roi-line", "draw-line", "draw-pts"];
-const ALL_SOURCES = ["hexes", "fires", "box", "sel", "roi", "draw"];
+const ALL_SOURCES = ["hexes", "fires", "fires-heat", "box", "sel", "roi", "draw"];
+
+/** points = clusters; heatmap = equal-weight detection density; heatmap_frp = FRP-weighted view. */
+export type LiveMapStyle = "points" | "heatmap" | "heatmap_frp";
+
+export type ArchiveDensityPoint = {
+  lat: number;
+  lon: number;
+  w: number;
+  n: number;
+  h3?: string;
+  boundary?: LatLng[];
+  frp_sum?: number;
+  platforms?: Record<string, number>;
+  instruments?: Record<string, number>;
+  window?: [string | null, string | null];
+};
 
 const esc = (v: unknown) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c] as string);
 
@@ -60,7 +80,12 @@ export class MapView {
   private sensor: Sensor = "all";
   private cells: HexCell[] = [];
   private live = false;
+  private liveStyle: LiveMapStyle = "points";
+  /** Archive multi-year density as H3 polygons (exact per-cell counts). */
+  private archiveHeat = false;
   private fires: FirePoint[] = [];
+  private archiveDensity: ArchiveDensityPoint[] = [];
+  private densWin: [string | null, string | null] | null = null;
   private selected: string | null = null;
   private drawing = false;
   private points: LatLng[] = [];
@@ -102,7 +127,12 @@ export class MapView {
       if (this.tileErrors === 3) this.opt.onBasemap(false);
     });
     this.map.on("sourcedata", (e) => {
-      if (e.sourceId !== "hexes" && e.sourceId !== "fires" && e.isSourceLoaded && this.tileErrors < 3) this.opt.onBasemap(true);
+      if (
+        e.sourceId !== "hexes" && e.sourceId !== "fires" && e.sourceId !== "fires-heat"
+        && e.isSourceLoaded && this.tileErrors < 3
+      ) {
+        this.opt.onBasemap(true);
+      }
     });
     this.map.on("click", (e) => this.mapClick(e));
     this.map.on("dblclick", (e) => {
@@ -141,6 +171,9 @@ export class MapView {
           type: "geojson", data: EMPTY, cluster: true,
           clusterMaxZoom: APP_CONFIG.MAP.CLUSTER.MAX_ZOOM, clusterRadius: APP_CONFIG.MAP.CLUSTER.MAX_RADIUS,
         });
+      } else if (id === "fires-heat") {
+        // Heatmap needs unclustered points (kernel density of detections).
+        m.addSource(id, { type: "geojson", data: EMPTY });
       } else {
         m.addSource(id, { type: "geojson", data: EMPTY });
       }
@@ -202,7 +235,13 @@ export class MapView {
           this.tip.remove();
         });
         m.on("click", id, (e) => {
-          const h3 = (e.features?.[0] as unknown as Feature | undefined)?.properties?.h3 as string | undefined;
+          const f = e.features?.[0] as unknown as Feature | undefined;
+          const props = f?.properties ?? {};
+          if (this.archiveHeat && props.dens) {
+            this.pop.setLngLat(e.lngLat).setHTML(this.densHtml(props)).addTo(m);
+            return;
+          }
+          const h3 = props.h3 as string | undefined;
           if (h3 && !this.drawing) this.opt.onHexClick(h3);
         });
       }
@@ -240,6 +279,42 @@ export class MapView {
         "circle-stroke-width": 0.8,
       },
     });
+    // Live detection-density heatmap (not burned area / fire-event count).
+    // Default weight = 1 per hotspot; heatmap_frp uses mild FRP boost (not cross-sensor FRP equality).
+    const ramp = v.calRamp;
+    m.addLayer({
+      id: "fire-heatmap",
+      type: "heatmap",
+      source: "fires-heat",
+      maxzoom: 15,
+      paint: {
+        "heatmap-weight": [
+          "interpolate", ["linear"], ["get", "w"],
+          0, 0, 0.2, 0.35, 1, 1,
+        ],
+        "heatmap-intensity": [
+          "interpolate", ["linear"], ["zoom"],
+          0, 0.55, 4, 0.9, 9, 1.35, 13, 1.8,
+        ],
+        "heatmap-color": [
+          "interpolate", ["linear"], ["heatmap-density"],
+          0, "rgba(0,0,0,0)",
+          0.12, ramp[0],
+          0.35, ramp[1],
+          0.55, ramp[2],
+          0.78, ramp[3],
+          1, ramp[4],
+        ],
+        "heatmap-radius": [
+          "interpolate", ["linear"], ["zoom"],
+          0, 2, 3, 8, 6, 18, 9, 28, 12, 40,
+        ],
+        "heatmap-opacity": [
+          "interpolate", ["linear"], ["zoom"],
+          7, 0.92, 12, 0.75, 14, 0.35, 15, 0,
+        ],
+      },
+    }, "fire-clusters");
   }
 
   private bindFireEvents() {
@@ -273,21 +348,82 @@ export class MapView {
 
   private applyMode() {
     if (!this.ready) return;
-    for (const id of HEX_VISUAL) this.map.getLayer(id) && this.map.setLayoutProperty(id, "visibility", this.live ? "none" : "visible");
-    for (const id of FIRE_LAYERS) this.map.getLayer(id) && this.map.setLayoutProperty(id, "visibility", this.live ? "visible" : "none");
-    if (this.live) this.tip.remove();
-    else this.pop.remove();
+    const showPoints = this.live && this.liveStyle === "points";
+    const showLiveHeat = this.live && (this.liveStyle === "heatmap" || this.liveStyle === "heatmap_frp");
+    const showArchiveHeat = !this.live && this.archiveHeat;
+    // Archive density uses H3 polygon fill on hexes (exact per-cell counts), not kernel heatmap.
+    for (const id of HEX_VISUAL) {
+      if (!this.map.getLayer(id)) continue;
+      const on = showArchiveHeat || (!this.live && !this.archiveHeat);
+      this.map.setLayoutProperty(id, "visibility", on ? "visible" : "none");
+    }
+    // Density polygons should stay visible at low zoom (unlike live hex fade-in).
+    if (this.map.getLayer("hex-fill")) {
+      this.map.setPaintProperty(
+        "hex-fill",
+        "fill-opacity",
+        showArchiveHeat
+          ? 0.72
+          : (["interpolate", ["linear"], ["zoom"], 8, 0, 10, 0.85] as mapboxgl.ExpressionSpecification),
+      );
+    }
+    if (this.map.getLayer("hex-line")) {
+      this.map.setPaintProperty(
+        "hex-line",
+        "line-opacity",
+        showArchiveHeat
+          ? 0.35
+          : (["interpolate", ["linear"], ["zoom"], 8, 0, 10, 0.3] as mapboxgl.ExpressionSpecification),
+      );
+    }
+    for (const id of FIRE_POINT_LAYERS) {
+      if (this.map.getLayer(id)) this.map.setLayoutProperty(id, "visibility", showPoints ? "visible" : "none");
+    }
+    for (const id of FIRE_HEAT_LAYERS) {
+      if (this.map.getLayer(id)) this.map.setLayoutProperty(id, "visibility", showLiveHeat ? "visible" : "none");
+    }
+    if (this.map.getLayer("fire-heatmap") && showLiveHeat) {
+      const radius = ["interpolate", ["linear"], ["zoom"], 0, 2, 3, 8, 6, 18, 9, 28, 12, 40] as mapboxgl.ExpressionSpecification;
+      const intensity = ["interpolate", ["linear"], ["zoom"], 0, 0.55, 4, 0.9, 9, 1.35, 13, 1.8] as mapboxgl.ExpressionSpecification;
+      this.map.setPaintProperty("fire-heatmap", "heatmap-radius", radius);
+      this.map.setPaintProperty("fire-heatmap", "heatmap-intensity", intensity);
+    }
+    if (this.live && !showArchiveHeat) this.tip.remove();
+    if (!showPoints && !showArchiveHeat) this.pop.remove();
   }
 
-  /** Canlı mod: kümelenmiş, güven renkli NASA FIRMS noktaları; kapalıyken H3 altıgenleri gösterilir. */
+  /** Canlı mod: kümelenmiş noktalar veya ısı haritası; kapalıyken H3 / arşiv yoğunluk. */
   setLive(live: boolean) {
     this.live = live;
     if (live) {
-      // Benchmark altıgenleri kaynakta kalmasın (görünmez olsa bile karışıklık yaratmasın)
+      this.archiveHeat = false;
+      this.archiveDensity = [];
+      this.densWin = null;
       this.src("hexes")?.setData({ type: "FeatureCollection", features: [] });
       this.cells = [];
     }
     this.applyMode();
+    if (!live) this.renderArchiveDensity();
+  }
+
+  /** Live display: points, equal-weight density heatmap, or FRP-weighted heatmap. */
+  setLiveStyle(style: LiveMapStyle) {
+    this.liveStyle = style;
+    this.applyMode();
+    this.renderFires();
+  }
+
+  /** Toggle archive multi-year H3 density polygons (requires setArchiveDensity). */
+  setArchiveHeat(on: boolean) {
+    this.archiveHeat = on && !this.live;
+    this.applyMode();
+    this.renderArchiveDensity();
+  }
+
+  setArchiveDensity(points: ArchiveDensityPoint[], window?: [string | null, string | null] | null) {
+    this.archiveDensity = points;
+    this.densWin = window ?? null;
+    this.renderArchiveDensity();
   }
 
   setPoints(points: FirePoint[]) {
@@ -295,21 +431,102 @@ export class MapView {
     this.renderFires();
   }
 
+  private renderArchiveDensity() {
+    if (!this.ready || this.dead) return;
+    if (this.live || !this.archiveHeat) {
+      if (!this.live) this.src("hexes")?.setData(EMPTY);
+      this.src("fires-heat")?.setData(EMPTY);
+      return;
+    }
+    const nMax = Math.max(1, ...this.archiveDensity.map((p) => p.n), 1);
+    const features: Feature[] = [];
+    for (const p of this.archiveDensity) {
+      if (p.n <= 0) continue;
+      const t = Math.min(1, Math.sqrt(p.n / nMax));
+      const platforms = p.platforms ? JSON.stringify(p.platforms) : "";
+      const instruments = p.instruments ? JSON.stringify(p.instruments) : "";
+      const props = {
+        h3: p.h3 ?? "",
+        n: p.n,
+        frp: p.frp_sum ?? 0,
+        t,
+        platforms,
+        instruments,
+        win0: this.densWin?.[0] ?? "",
+        win1: this.densWin?.[1] ?? "",
+        dens: 1,
+      };
+      const b = p.boundary;
+      if (b && b.length >= 3) {
+        features.push({
+          type: "Feature",
+          properties: props,
+          geometry: { type: "Polygon", coordinates: [ring(b)] },
+        });
+      } else {
+        features.push({
+          type: "Feature",
+          properties: props,
+          geometry: { type: "Point", coordinates: [p.lon, p.lat] },
+        });
+      }
+    }
+    this.src("hexes")?.setData({ type: "FeatureCollection", features });
+    this.src("fires-heat")?.setData(EMPTY);
+  }
+
+  private densHtml(p: Record<string, unknown>): string {
+    let plat = "";
+    try {
+      const o = JSON.parse(String(p.platforms || "{}")) as Record<string, number>;
+      plat = Object.entries(o).map(([k, v]) => `${esc(k)} ${fmt(v)}`).join(" · ");
+    } catch { /* ignore */ }
+    let inst = "";
+    try {
+      const o = JSON.parse(String(p.instruments || "{}")) as Record<string, number>;
+      inst = Object.entries(o).map(([k, v]) => `${esc(k)} ${fmt(v)}`).join(" · ");
+    } catch { /* ignore */ }
+    const win = p.win0 && p.win1 ? `${esc(p.win0)} → ${esc(p.win1)} UTC` : "";
+    return `<b>${esc(p.h3)}</b><br>`
+      + `Tespit (detections): <b>${fmt(Number(p.n))}</b><br>`
+      + (inst ? `${inst}<br>` : "")
+      + (plat ? `Platform: ${plat}<br>` : "")
+      + `FRP sum: ${fmt(Number(p.frp), 1)} MW<br>`
+      + (win ? `${win}<br>` : "")
+      + `<small>FIRMS hotspot detections — not fire events / burned area</small>`;
+  }
+
   private renderFires() {
     if (!this.ready || this.dead) return;
     const features: Feature[] = new Array(this.fires.length);
+    const heatFeatures: Feature[] = new Array(this.fires.length);
+    const frpMode = this.liveStyle === "heatmap_frp";
     for (let i = 0; i < this.fires.length; i++) {
       const p = this.fires[i];
+      const geom = { type: "Point" as const, coordinates: [p.longitude, p.latitude] as [number, number] };
       features[i] = {
         type: "Feature",
         properties: {
           conf: p.confidenceCode, label: p.confidenceLabel, inst: p.instrument, sat: p.satellite,
           at: p.acquiredAt, temp: p.temperatureCelsius, frp: p.frp,
         },
-        geometry: { type: "Point", coordinates: [p.longitude, p.latitude] },
+        geometry: geom,
+      };
+      const frp = Number.isFinite(p.frp) ? Math.max(0, p.frp) : 0;
+      // Equal weight per detection by default; FRP mode is explicitly labeled in the UI.
+      const w = frpMode
+        ? Math.min(1, 0.35 + Math.log1p(frp) / Math.log1p(80))
+        : 1;
+      heatFeatures[i] = {
+        type: "Feature",
+        properties: { w, frp, inst: p.instrument, sat: p.satellite },
+        geometry: geom,
       };
     }
     this.src("fires")?.setData({ type: "FeatureCollection", features });
+    if (this.live) {
+      this.src("fires-heat")?.setData({ type: "FeatureCollection", features: heatFeatures });
+    }
   }
 
   private refresh() {
@@ -390,11 +607,19 @@ export class MapView {
   }
 
   private tipHtml(p: Record<string, unknown>): string {
+    if (p.dens) {
+      return `${esc(p.h3)}<br>${fmt(Number(p.n))} detections`
+        + (p.frp != null ? ` · FRP Σ ${fmt(Number(p.frp), 1)} MW` : "");
+    }
     return `${String(p.h3)}<br>MODIS ${fmt(Number(p.modis))} &middot; VIIRS ${fmt(Number(p.viirs))}`;
   }
 
   private render() {
     if (!this.ready || this.dead) return;
+    if (this.archiveHeat) {
+      this.renderArchiveDensity();
+      return;
+    }
     const vmax = this.scaleMax();
     const features: Feature[] = [];
     for (const c of this.cells) {

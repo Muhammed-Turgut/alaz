@@ -1,7 +1,7 @@
 import type {
-  AreaCalendarResult, ArchiveStatus, BreakPayload, BriefingAudience, BriefingResult, CalendarPayload,
-  GeometryPayload, Health, HarmonizedDetection, HexDetail, HexPayload, LatLng, ModelPayload, Region,
-  RoiResult, Scope, SeriesPayload, StaticSources, ValidationPayload,
+  AreaCalendarResult, AreaDensityResult, ArchiveStatus, BreakPayload, BriefingAudience, BriefingResult,
+  CalendarPayload, GeometryPayload, Health, HarmonizedDetection, HexDetail, HexPayload, LatLng,
+  ModelPayload, Region, RoiResult, Scope, SeriesPayload, StaticSources, ValidationPayload,
 } from "./types";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -91,13 +91,23 @@ export const api = {
       "/api/area-break",
       { polygon: opts.polygon ?? null },
     ),
+  areaDensity: (opts: {
+    polygon?: LatLng[] | null;
+    years: number;
+    instrument?: "all" | "MODIS" | "VIIRS";
+  }) =>
+    post<AreaDensityResult>("/api/area-density", {
+      polygon: opts.polygon ?? null,
+      years: opts.years,
+      instrument: opts.instrument ?? "all",
+    }),
   hexes: (s: Scope, refresh = false): Promise<HexPayload> =>
     request(`/api/live?days=${s.days}${refresh ? "&refresh=true" : ""}`),
   hex: (cell: string, s: Scope) =>
     request<HexDetail>(`/api/hex/${cell}?source=live&days=${s.days}`),
   roi: (s: Scope) => post<RoiResult>("/api/roi", { ...scopeBody(s), polygon: s.roi }),
-  briefing: (s: Scope, audience: BriefingAudience = "acil") =>
-    post<BriefingResult>("/api/briefing", { ...scopeBody(s), polygon: s.roi, audience }),
+  briefing: (s: Scope, audience: BriefingAudience = "acil", lang: "tr" | "en" = "tr") =>
+    post<BriefingResult>("/api/briefing", { ...scopeBody(s), polygon: s.roi, audience, lang }),
   exportHotspotsCsv: async (opts: {
     source: "live" | "archive";
     polygon: LatLng[];
@@ -129,6 +139,7 @@ export const api = {
     focus: "break" | "calendar" | "model" | "briefing";
     section?: string;
     question?: string;
+    lang?: "tr" | "en";
   }) =>
     post<{
       available: boolean;
@@ -138,11 +149,13 @@ export const api = {
       markdown?: string;
       model?: string;
       used_numbers?: Record<string, unknown>;
+      lang?: string;
     }>("/api/interpret", {
       polygon: opts.polygon,
       focus: opts.focus,
       section: opts.section || "overview",
       question: opts.question || null,
+      lang: opts.lang || "tr",
     }),
   harmonize: (det: Record<string, unknown>) =>
     post<{ detections: HarmonizedDetection[]; model: string }>("/api/harmonize", { detections: [det] }),

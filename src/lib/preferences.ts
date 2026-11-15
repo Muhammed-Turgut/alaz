@@ -3,16 +3,19 @@ import { useSyncExternalStore } from "react";
 export type Theme = "light" | "dark";
 export type MapStyle = "auto" | "light" | "dark" | "satellite";
 export type CalRamp = "default" | "colorblind";
+export type Lang = "tr" | "en";
 
 export interface Prefs {
   theme: Theme;
   mapStyle: MapStyle;
   calRamp: CalRamp;
+  lang: Lang;
 }
 
 const KEY = "alaz.prefs";
 const MAP_STYLES: MapStyle[] = ["auto", "light", "dark", "satellite"];
 const CAL_RAMPS: CalRamp[] = ["default", "colorblind"];
+const LANGS: Lang[] = ["tr", "en"];
 
 function load(): Prefs {
   try {
@@ -21,9 +24,10 @@ function load(): Prefs {
       theme: raw.theme === "dark" ? "dark" : "light",
       mapStyle: MAP_STYLES.includes(raw.mapStyle as MapStyle) ? (raw.mapStyle as MapStyle) : "auto",
       calRamp: CAL_RAMPS.includes(raw.calRamp as CalRamp) ? (raw.calRamp as CalRamp) : "default",
+      lang: LANGS.includes(raw.lang as Lang) ? (raw.lang as Lang) : "tr",
     };
   } catch {
-    return { theme: "light", mapStyle: "auto", calRamp: "default" };
+    return { theme: "light", mapStyle: "auto", calRamp: "default", lang: "tr" };
   }
 }
 
@@ -33,6 +37,7 @@ const subs = new Set<() => void>();
 function apply() {
   document.documentElement.dataset.theme = prefs.theme;
   document.documentElement.dataset.calRamp = prefs.calRamp;
+  document.documentElement.lang = prefs.lang === "en" ? "en" : "tr";
 }
 apply(); // ilk boyamadan önce uygula (yanıp sönme olmasın)
 

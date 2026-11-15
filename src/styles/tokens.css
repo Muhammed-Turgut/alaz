@@ -69,6 +69,7 @@
   --viz-sat-aqua: var(--palette-blue);
   --viz-sat-snpp: var(--palette-sky);
   --viz-sat-noaa20: #a8982f;
+  --viz-sat-noaa21: #6b8f3a;
   --viz-map-bg: #ececec;
   --viz-conf-high: var(--palette-blue);      /* canlı nokta güveni: yüksek -> normal -> düşük -> bilinmiyor */
   --viz-conf-nominal: var(--palette-sky);
@@ -166,6 +167,8 @@
   --viz-sat-terra: var(--palette-white);
   --viz-sat-aqua: var(--palette-sky);
   --viz-sat-snpp: #9fd3ee;
+  --viz-sat-noaa20: #c4b24a;
+  --viz-sat-noaa21: #8fbf5a;
   --viz-map-bg: #1b1b1b;
   --viz-conf-high: var(--palette-white);
   --viz-conf-nominal: var(--palette-sky);

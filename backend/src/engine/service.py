@@ -10,12 +10,14 @@ import pandas as pd
 
 from src.analytics.burning_calendar import build_calendar, current_month_vs_median, month_year_matrix
 from src.data import benchmark_archives as arch
-from src.data.archive_store import ArchiveStore
+from src.data.archive_store import ArchiveStore, polygon_bbox
 from src.data.firms_client import FirmsClient
 from src.data.regions import BIOMES, REGIONS
+from src.data.remote_roi import REMOTE_DEFAULT_YEARS, REMOTE_MAX_YEARS, RemoteRoiClient
 from src.engine import geometry_h3 as geo
 from src.engine import pipeline as pl
 from src.engine import stats_diagnostics as sd
+from src.engine.confidence_policies import PRIMARY_POLICY, confidence_filter_sensitivity
 from src.engine.diurnal_normalizer import (
     PARAMS as DIURNAL,
     diurnal_factor,
@@ -24,7 +26,7 @@ from src.engine.diurnal_normalizer import (
 )
 from src.engine.harmonizer_ml import MODEL_PATH, HarmonizerModel, add_cell_context
 from src.engine.prepare import prepare
-from src.engine.sensors import VIIRS_START
+from src.engine.sensors import TIMELINE_MARKERS, VIIRS_START, n_operating
 from src.engine.static_filter import KNOWN_SOURCES, tag_static
 
 log = logging.getLogger("aether.service")
@@ -98,6 +100,7 @@ class AetherState:
         self.load_seconds = 0.0
         self.trained_now = False
         self.archive = ArchiveStore("tr")
+        self.remote = RemoteRoiClient(map_key=map_key)
         self._area_cache: dict | None = None  # seçilen ROI için günlük seri önbelleği
 
     # ------------------------------------------------------------------
@@ -185,10 +188,16 @@ class AetherState:
             hold = m.loc["2022-01-01":]
             pre = m.loc[:"2011-12-01"]
             out["regions"][rid] = {
-                "holdout_2022_2026": block(hold, hold["viirs_native"], "2022-01..2026-10 (hold-out, drifted orbits)",
-                                           "VIIRS native (SNPP/NOAA-20)"),
-                "counterfactual_2001_2011": block(pre, pre["counterfactual_snpp"], "2001-01..2011-12 (pre-VIIRS)",
-                                                  "hidden counterfactual SNPP record"),
+                "synthetic_holdout_2022_2026": block(
+                    hold, hold["viirs_native"],
+                    "Synthetic benchmark hold-out 2022-01..2026-10 (NOT real NASA FIRMS)",
+                    "Synthetic VIIRS-native reference (SNPP/NOAA-20 sim)",
+                ),
+                "synthetic_counterfactual_2001_2011": block(
+                    pre, pre["counterfactual_snpp"],
+                    "Synthetic pre-VIIRS 2001-01..2011-12 (counterfactual SNPP record)",
+                    "Hidden synthetic counterfactual SNPP",
+                ),
             }
         from src.engine.static_filter import evaluate_against_truth
         out["static_filter"] = {rid: evaluate_against_truth(r["df"], r["df"]["is_static"].to_numpy())
@@ -234,14 +243,27 @@ class AetherState:
 
     def model_payload(self) -> dict:
         m = self.model
+        matchups = dict(getattr(m, "matchup_summary", {}) or {})
+        matchups.setdefault("evaluation_kind", "synthetic_benchmark")
+        matchups.setdefault(
+            "evaluation_note",
+            "Train/calib/test year blocks are synthetic-benchmark only — not real NASA FIRMS hold-out.",
+        )
+        matchups.setdefault("geographic_generalization", "not_validated")
         return clean({
-            "version": m.version, "metrics": m.metrics, "importance": m.importance,
+            "version": m.version, "metrics": m.metrics,
+            "importance": m.importance,
+            "importance_label": "model sensitivity / inputs that affect predictions (not causal explanation)",
             "calibration": {BIOMES[g]: v for g, v in m.calibration.items()},
             "conformal_margin_log": {f"{BIOMES[g]}/{t}": v for (g, t), v in m.conformal.items()},
-            "matchups": getattr(m, "matchup_summary", {}),
+            "matchups": matchups,
             "feature_groups": list(__import__("src.engine.harmonizer_ml", fromlist=["FEATURE_GROUPS"]).FEATURE_GROUPS),
             "kappa": self.kappa,
             "diurnal": self._diurnal_model(),
+            "tracks": {
+                "synthetic_benchmark": "Known simulation truth; year blocks 2012–2019 / 2020–2021 / 2022–2026",
+                "real_firms_archive": "Monthly VIIRS comparison reference on Turkey ROI — not ground truth",
+            },
         })
 
     @staticmethod
@@ -255,7 +277,7 @@ class AetherState:
             "curve": {"lst": hrs.tolist(), "relative_intensity": np.asarray(diurnal_factor(hrs), dtype=float).round(4).tolist()},
             "overpass_drift": {"years": years.tolist(),
                                **{s: np.asarray(nominal_day_lst(s, years), dtype=float).round(3).tolist()
-                                  for s in ("Terra", "Aqua", "SNPP", "NOAA20")}},
+                                  for s in ("Terra", "Aqua", "SNPP", "NOAA20", "NOAA21")}},
         }
 
     def regions_payload(self) -> list:
@@ -410,15 +432,43 @@ class AetherState:
             return empty, meta
         df = prepare(raw)
         df = tag_static(df, self.catalog_cells, use_seeds=True, provisional=(days >= 5))
-        nm = max(1, df.loc[df["instrument"] == "MODIS", "satellite"].nunique())
-        nv = max(1, df.loc[df["instrument"] == "VIIRS", "satellite"].nunique())
+        # Time-varying platform counts (avoids step when NOAA-21 joins NOAA-20).
+        nm = n_operating(df["ts"], "MODIS")
+        nv = n_operating(df["ts"], "VIIRS")
         df = pl.attach_harmonized(df, self.model, n_ops_modis=nm, n_ops_viirs=nv)
         df = _slim(df).reset_index(drop=True)
-        meta.update({"platforms": {"MODIS": nm, "VIIRS": nv}})
-        if meta["tiers"] and all(t == "bundled-sample" for t in meta["tiers"]):
-            meta["warning"] = "Offline: showing the bundled real FIRMS snapshot (2026-11-13/14), not live data."
-        elif "stale-cache" in meta["tiers"] or "bundled-sample" in meta["tiers"]:
-            meta["warning"] = "Some products are cached or bundled; see per-source tiers."
+        sat_counts = {str(k): int(v) for k, v in df["satellite"].value_counts().items()} if len(df) else {}
+        meta.update({
+            "platforms": {
+                "MODIS": float(np.mean(nm)) if len(nm) else 0,
+                "VIIRS": float(np.mean(nv)) if len(nv) else 0,
+            },
+            "satellites": sat_counts,
+            "times_utc": True,
+            "product_kind": "nrt",
+            "timeline_markers": TIMELINE_MARKERS,
+        })
+        tiers = meta.get("tiers") or []
+        if tiers and all(t == "bundled-sample" for t in tiers):
+            meta["warning"] = "Offline: bundled real FIRMS snapshot — not live data."
+            meta["live"] = False
+        elif "stale-cache" in tiers or "bundled-sample" in tiers:
+            meta["warning"] = (
+                "Some products are stale-cache or bundled; see per-source tiers. "
+                "Not a fresh NASA pull — observation window follows newest/oldest timestamps."
+            )
+            meta["live"] = False
+        elif tiers and all(t == "cache" for t in tiers):
+            meta["warning"] = (
+                "Fresh disk cache (within TTL) — not a new live API/open-feed pull this request. "
+                "See source_fetched_at vs retrieved_at."
+            )
+            meta["live"] = False
+        elif "cache" in tiers and not meta.get("live"):
+            meta["warning"] = (
+                "Mixed tiers include cache; live=false unless every non-empty product was "
+                "fetched from API/open-feed this request."
+            )
         self._live_cache[key] = {"t": time.time(), "df": df, "meta": meta}
         return df, meta
 
@@ -436,7 +486,7 @@ class AetherState:
             df, meta = self.get_live(days, bbox)
             return df, "live", meta
         if source == "archive":
-            # API bbox = [south, west, north, east]; arşiv kutusu = (west, south, east, north)
+            # API bbox = [south, west, north, east]; archive/store = (west, south, east, north)
             store_bbox = None
             if bbox is not None:
                 s, w, n, e = bbox
@@ -444,12 +494,12 @@ class AetherState:
             if polygon is None and store_bbox is None:
                 raise ValueError(
                     "Gerçek arşiv brifingi için haritada bir poligon çiz "
-                    f"(üst sınır ~{int(self.archive.status().get('max_area_km2', 120000)):,} km², Türkiye kutusu içinde)."
+                    f"(üst sınır ~{int(self.archive.status().get('max_area_km2', 120000)):,} km²; "
+                    "dünya geneli — Türkiye kutusu yerel disk, dışı FIRMS Area API)."
                 )
-            raw, meta = self.archive.query(bbox=store_bbox, polygon=polygon)
-            if raw.empty:
-                return pd.DataFrame(), "spliced", meta
-            df = self._prepare_archive_detections(raw)
+            df, _, meta = self._load_area(
+                polygon=polygon, bbox=store_bbox, history_years=REMOTE_DEFAULT_YEARS,
+            )
             return df, "spliced", meta
         if region not in self.regions:
             raise ValueError(f"unknown region '{region}'")
@@ -606,7 +656,7 @@ class AetherState:
         return round((float(np.log1p(cur)) - med) / scale, 2)
 
     def briefing(self, source: str = "benchmark", region: str | None = "california", start=None, end=None,
-                 polygon=None, days: int = 1, bbox=None, audience: str = "acil") -> dict:
+                 polygon=None, days: int = 1, bbox=None, audience: str = "acil", lang: str = "tr") -> dict:
         from src.analytics.briefing_generator import generate
         if source == "benchmark":
             region = region or "california"
@@ -652,19 +702,35 @@ class AetherState:
             window = f"son {days} gün"
         elif source == "archive":
             dr = meta.get("date_range") or [None, None]
+            tier = meta.get("data_tier") or "local-disk-archive"
+            remote = tier == "remote-firms-api"
             quality = {
-                "basis": "NASA FIRMS tarihsel arşivi (Türkiye kapsaması)",
+                "basis": (
+                    "NASA FIRMS Area API (on-demand, year-capped)"
+                    if remote
+                    else "NASA FIRMS tarihsel arşivi (yerel Türkiye disk)"
+                ),
                 "synthetic": False,
                 "non_live": False,
                 "historical": True,
+                "data_tier": tier,
                 "notes": [
+                    meta.get("note"),
                     meta.get("model_note")
-                    or "Sayılar bu ROI’nin gerçek NASA FIRMS arşivinden. Harmonize isteğe bağlıdır; Ham seri birincil kaynaktır.",
-                    f"Arşiv ilerleme: {meta.get('done_chunks', '?')}/{meta.get('total_chunks', '?')}"
-                    + (" (kısmi)" if meta.get("partial") else ""),
+                    or (
+                        "Sayılar bu ROI’nin gerçek NASA FIRMS verisinden. "
+                        "Harmonize sentetik benchmark’ta eğitildi; VIIRS referanstır, yer-gerçeği değil."
+                    ),
+                    "Sıcak nokta ≠ yangın sayısı ≠ yanmış alan; FRP ≠ yanmış alan. Brifing = ön tarama, talimat değil.",
+                    f"Dilimler: {meta.get('done_chunks', '?')}/{meta.get('total_chunks', '?')}"
+                    + (" (kısmi/önbellek)" if meta.get("partial") else ""),
                 ],
             }
-            scope = "FIRMS arşiv TR" + (" — ROI poligon" if polygon else "")
+            quality["notes"] = [n for n in quality["notes"] if n]
+            scope = (
+                ("FIRMS uzaktan API" if remote else "FIRMS yerel arşiv")
+                + (" — ROI poligon" if polygon else "")
+            )
             window = f"{dr[0]} → {dr[1]}" if dr[0] else "mevcut arşiv aralığı"
             val = meta.get("local_validation") or val
         else:
@@ -675,7 +741,7 @@ class AetherState:
         ctx = {"scope": scope, "window": window, "totals": totals, "top_cells": top, "climate": climate,
                "drivers": self._explain_summary(sub), "quality": quality, "validation": val,
                "centre": [float(sub["latitude"].mean()), float(sub["longitude"].mean())],
-               "audience": audience or "acil"}
+               "audience": audience or "acil", "lang": lang or "tr"}
         return clean(generate(ctx))
 
     def export_hotspots_csv(self, *, source: str, polygon: list[list[float]], days: int = 1) -> tuple[str, dict]:
@@ -685,7 +751,7 @@ class AetherState:
         if not polygon or len(polygon) < 3:
             raise ValueError("polygon gerekli (≥ 3 köşe)")
         if source == "archive":
-            df, _, meta = self._load_area(polygon=polygon)
+            df, _, meta = self._load_area(polygon=polygon, history_years=REMOTE_DEFAULT_YEARS)
             if df.empty:
                 return "latitude,longitude,acq_date,acq_time,satellite,instrument,frp,brightness,confidence\n", {
                     "n": 0, "source": "archive", "truncated": False, "meta": meta,
@@ -696,11 +762,16 @@ class AetherState:
                 return "latitude,longitude,acq_date,acq_time,satellite,instrument,frp,brightness,confidence\n", {
                     "n": 0, "source": "live", "truncated": False, "meta": meta,
                 }
-            cells = geo.cells_in_polygon(polygon, geo.RES_REGIONAL)
-            if "h3_7" in df.columns:
-                df = df[df["h3_7"].isin(cells)]
+            from src.data.archive_store import point_in_ring
+            # True polygon clip (not bbox-only) before export
+            if "latitude" in df.columns and "longitude" in df.columns:
+                inside = point_in_ring(
+                    df["latitude"].to_numpy(dtype=float),
+                    df["longitude"].to_numpy(dtype=float),
+                    polygon,
+                )
+                df = df.loc[inside]
             else:
-                # fallback: bbox clip
                 lats = [p[0] for p in polygon]
                 lons = [p[1] for p in polygon]
                 df = df[
@@ -734,9 +805,25 @@ class AetherState:
             pd.to_numeric(df[bright_col], errors="coerce").to_numpy() if bright_col else [None] * len(df)
         )
         rows["confidence"] = df["confidence"].to_numpy() if "confidence" in df.columns else [None] * len(df)
+        for col, key in (
+            ("firms_source", "firms_source"),
+            ("product_kind", "product_kind"),
+            ("product_version", "product_version"),
+            ("daynight", "daynight"),
+        ):
+            if col in df.columns:
+                rows[key] = df[col].astype(str).to_numpy()
+        rows["row_meaning"] = np.full(len(df), "FIRMS_hotspot_detection")
 
         out = pd.DataFrame(rows)
+        # CSV header comment block (first lines) for download clarity
+        header_note = (
+            "# Each row is one FIRMS hotspot detection (not fire count / burned area).\n"
+            "# Times are UTC acquisition. product_kind: standard|nrt|unknown.\n"
+            f"# source={source} n={len(out)} truncated={truncated} limit={limit}\n"
+        )
         buf = io.StringIO()
+        buf.write(header_note)
         out.to_csv(buf, index=False)
         info = {
             "n": int(len(out)),
@@ -744,36 +831,78 @@ class AetherState:
             "truncated": truncated,
             "limit": limit,
             "area_km2": (meta or {}).get("area_km2") if source == "archive" else None,
+            "row_meaning": "FIRMS_hotspot_detection",
+            "times_utc": True,
+            "columns_help": {
+                "latitude": "Detection pixel center latitude (not exact fire location)",
+                "longitude": "Detection pixel center longitude",
+                "acq_date": "Acquisition date UTC",
+                "acq_time": "Acquisition time UTC HHMM",
+                "frp": "Fire Radiative Power (MW) at detection — not burned area",
+                "firms_source": "FIRMS product id (e.g. MODIS_SP, VIIRS_NOAA20_NRT)",
+                "product_kind": "standard | nrt | unknown",
+            },
+            "attribution": "NASA FIRMS data used by an independent prototype — not a NASA-endorsed product",
+            "meta": meta,
         }
         return buf.getvalue(), info
 
     # ------------------------------------------------------------------
-    # gerçek FIRMS arşivi (Türkiye kapsama) — seçilen alan (tüm sekmeler)
+    # gerçek FIRMS — yerel TR arşivi veya küresel on-demand Area API
     # ------------------------------------------------------------------
     def archive_status(self) -> dict:
-        return clean(self.archive.status())
+        st = self.archive.status()
+        st["remote_api_configured"] = bool(self.remote.configured())
+        st["remote_max_years"] = REMOTE_MAX_YEARS
+        st["global_roi"] = True
+        st["local_coverage_note"] = (
+            "Dashed box = local Turkey disk archive (fast, full depth). "
+            "ROI anywhere else uses on-demand FIRMS Area API (MAP_KEY, cached, year-capped)."
+        )
+        return clean(st)
 
     def _prepare_archive_detections(self, raw: pd.DataFrame) -> pd.DataFrame:
-        """Standartlaştırılmış arşiv satırlarını prepare + static + harmonize zincirinden geçir."""
-        keep = [c for c in raw.columns if c not in ("firms_source",)]
-        df = prepare(raw[keep].copy())
+        """Standartlaştırılmış arşiv satırlarını prepare + static + harmonize zincirinden geçir.
+
+        ``firms_source`` / ``product_kind`` korunur (provenance). Platform normalizasyonu
+        zamanla değişen ``n_operating`` ile yapılır; yeni uydu eklenince ani sıçrama olmaz.
+        """
+        meta_cols = [c for c in ("firms_source", "product_kind", "product_version", "daynight_raw", "nasa_type")
+                     if c in raw.columns]
+        base = raw.drop(columns=[c for c in meta_cols if c in raw.columns], errors="ignore")
+        df = prepare(base.copy())
+        for c in meta_cols:
+            df[c] = raw[c].to_numpy()
         df = tag_static(df, self.catalog_cells, use_seeds=True, provisional=True)
         if "nasa_type" in df.columns:
             m = (df["nasa_type"] == 2) & ~df["is_static"]
             df.loc[m, "is_static"] = True
             df.loc[m, "static_reason"] = "nasa-type-2"
-        nm = max(1, int(df.loc[df["instrument"] == "MODIS", "satellite"].nunique()) or 1)
-        nv = max(1, int(df.loc[df["instrument"] == "VIIRS", "satellite"].nunique()) or 1)
+        nm = n_operating(df["ts"], "MODIS")
+        nv = n_operating(df["ts"], "VIIRS")
         return pl.attach_harmonized(df, self.model, n_ops_modis=nm, n_ops_viirs=nv)
 
     @staticmethod
-    def _area_cache_key(polygon, bbox, force: bool) -> tuple:
+    def _area_cache_key(polygon, bbox, force: bool, history_years: int | None, tier: str) -> tuple:
         poly = tuple((round(float(a), 5), round(float(b), 5)) for a, b in (polygon or []))
         box = None if bbox is None else tuple(round(float(x), 5) for x in bbox)
-        return (poly, box, bool(force))
+        return (poly, box, bool(force), history_years, tier)
 
-    def _load_area(self, *, polygon=None, bbox=None, force: bool = False) -> tuple[pd.DataFrame, pd.DataFrame, dict]:
-        """Seçilen alan: ham sorgu → prepare/harmonize → günlük seri. Aynı ROI için önbellekler."""
+    def _resolve_query_bbox(self, polygon, store_bbox) -> tuple[float, float, float, float]:
+        if polygon is not None:
+            return polygon_bbox(polygon)
+        assert store_bbox is not None
+        return store_bbox
+
+    def _load_area(
+        self,
+        *,
+        polygon=None,
+        bbox=None,
+        force: bool = False,
+        history_years: int | None = None,
+    ) -> tuple[pd.DataFrame, pd.DataFrame, dict]:
+        """Seçilen alan: yerel TR arşivi veya küresel FIRMS Area API → prepare/harmonize."""
         store_bbox = None
         if bbox is not None:
             if len(bbox) != 4:
@@ -782,16 +911,42 @@ class AetherState:
         if polygon is None and store_bbox is None:
             raise ValueError("polygon veya bbox gerekli")
 
-        key = self._area_cache_key(polygon, store_bbox, force)
+        west, south, east, north = self._resolve_query_bbox(polygon, store_bbox)
+        # Area limit always applies (local or remote)
+        self.archive.assert_area_limit(west, south, east, north)
+
+        use_local = self.archive.contains_bbox(west, south, east, north)
+        hy = None if use_local else max(1, min(int(history_years or REMOTE_DEFAULT_YEARS), REMOTE_MAX_YEARS))
+        tier = "local" if use_local else "remote"
+
+        key = self._area_cache_key(polygon, store_bbox, force, hy, tier)
         arch_key = (
             int(self.archive.status().get("done_chunks") or 0),
             self.archive.status().get("state"),
+            tier,
+            hy,
         )
         hit = self._area_cache
         if hit and not force and hit.get("key") == key and hit.get("arch_key") == arch_key:
             return hit["df"], hit["daily"], hit["meta"]
 
-        raw, meta = self.archive.query(bbox=store_bbox, polygon=polygon, force=force)
+        if use_local:
+            raw, meta = self.archive.query(bbox=store_bbox, polygon=polygon, force=force)
+            meta = {**meta, "data_tier": "local-disk-archive", "local_archive": True}
+        else:
+            if not self.remote.configured():
+                raise ValueError(
+                    "Bu ROI yerel Türkiye arşivi dışında. Küresel ROI için backend/.env içinde "
+                    "FIRMS_MAP_KEY gerekli (veya kesik kutu içine daha küçük bir poligon çiz)."
+                )
+            req_hy = int(history_years or REMOTE_DEFAULT_YEARS)
+            raw, meta = self.remote.fetch(
+                west=west, south=south, east=east, north=north,
+                years=hy or REMOTE_DEFAULT_YEARS,
+                polygon=polygon,
+                requested_years=req_hy,
+            )
+
         if raw.empty:
             empty = pd.DataFrame()
             self._area_cache = {"key": key, "arch_key": arch_key, "df": empty, "daily": empty, "meta": meta}
@@ -804,8 +959,12 @@ class AetherState:
         meta = {
             **meta,
             "model": self.model.version,
-            "model_note": "Sayılar bu ROI’nin gerçek NASA FIRMS arşivinden. "
-                          "Birincil analiz serisi VIIRS-eşdeğer harmonize; ham karşılaştırma içindir.",
+            "model_note": (
+                "Numbers from real NASA FIRMS for this ROI "
+                f"({'local Turkey disk archive' if use_local else 'on-demand Area API'}). "
+                "Harmonized (VIIRS-equivalent) trained on synthetic benchmark; "
+                "VIIRS is a comparison reference. Prefer Raw if local RMSE worsens."
+            ),
             "detections": int(len(df)),
             "raw_count": int(len(df)),
             "date_range": [start, end],
@@ -816,6 +975,13 @@ class AetherState:
                 "static_removed": int(daily["static_removed"].sum()),
             },
             "intensity": self._frp_intensity(df),
+            "timeline_markers": TIMELINE_MARKERS,
+            "empty_reason": None,
+            "evaluation_note": (
+                "Harmonization trained on synthetic benchmark. "
+                "Local metrics are monthly MODIS→VIIRS reference comparison on real FIRMS — "
+                "not event-level independent validation."
+            ),
         }
         self._area_cache = {"key": key, "arch_key": arch_key, "df": df, "daily": daily, "meta": meta}
         return df, daily, meta
@@ -856,18 +1022,101 @@ class AetherState:
                 out[f"{key}_frp_ort_mw"] = round(float(g.mean()), 2) if len(g) else None
         return out
 
-    def _area_local_validation(self, daily: pd.DataFrame) -> dict:
+    def _area_local_validation(
+        self,
+        daily: pd.DataFrame,
+        meta: dict | None = None,
+        df: pd.DataFrame | None = None,
+    ) -> dict:
+        """Monthly MODIS→VIIRS comparison on the real archive (policy A main path).
+
+        VIIRS is a **comparison reference**, not independent ground truth.
+        Covered zero-detection months stay in the sample; months without product
+        coverage are excluded (not zero-filled).  Platform-scale baseline is
+        learned on a calibration window and scored on later test months.
+
+        Confidence policies B/C appear only under ``confidence_sensitivity`` —
+        they never replace the production filter (policy A).
+        """
+        from src.analytics.reference_comparison import (
+            compare_to_viirs_reference,
+            product_coverage_table,
+            select_evaluation_months,
+        )
+
         if daily is None or daily.empty:
-            return {}
+            return {"n": 0, "label": "real_archive_reference_comparison", "improved": None}
         monthly = daily.resample("MS").sum(min_count=1)
         post = monthly.index >= VSTART
         if not post.any():
-            return {}
-        ref = monthly.loc[post, "viirs_native"].to_numpy(dtype=float)
-        raw_m = monthly.loc[post, "modis_filtered"].to_numpy(dtype=float)
-        harm_m = monthly.loc[post, "harm_modis_only"].to_numpy(dtype=float)
-        both = (ref > 0) & ((raw_m > 0) | (harm_m > 0))
-        return sd.harmonization_metrics(ref[both], raw_m[both], harm_m[both]) if both.any() else {}
+            return {"n": 0, "label": "real_archive_reference_comparison",
+                    "note": "No post-VIIRS months in this ROI."}
+
+        products = (meta or {}).get("archive_products")
+        # Only use the local TR product calendar for local-disk archives (never for remote ROI).
+        if products is None and (meta or {}).get("data_tier") == "local-disk-archive":
+            try:
+                from src.data.archive_store import _area_json
+                products = _area_json(self.archive.root).get("products")
+            except Exception:  # noqa: BLE001
+                products = None
+
+        coverage = product_coverage_table(products or {}, monthly.index) if products else None
+        # Prefer completed Standard overlap when a product calendar is available
+        month_info = select_evaluation_months(
+            monthly, coverage,
+            require_both_sensors=True,
+            standard_only=bool(products),
+            post_viirs_only=True,
+        )
+        mask = month_info["mask"]
+        if not mask.any():
+            out = {
+                "n": 0, "label": "real_archive_reference_comparison",
+                "note": "No overlapping MODIS/VIIRS months with product coverage.",
+                "n_excluded_no_coverage": month_info.get("n_excluded_no_coverage"),
+                "reference_name": "VIIRS comparison reference (not ground truth)",
+                "confidence_policy_primary": PRIMARY_POLICY,
+            }
+            if df is not None and not getattr(df, "empty", True):
+                out["confidence_sensitivity"] = confidence_filter_sensitivity(df)
+            return out
+
+        months = monthly.index[mask]
+        ref = monthly.loc[months, "viirs_native"].to_numpy(dtype=float)
+        raw_m = monthly.loc[months, "modis_filtered"].to_numpy(dtype=float)
+        harm_m = monthly.loc[months, "harm_modis_only"].to_numpy(dtype=float)
+        metrics = compare_to_viirs_reference(ref, raw_m, harm_m, months=months)
+        metrics["improved"] = bool(metrics.get("rmse_reduction_pct", 0) > 0)
+        metrics["recommend_raw"] = not metrics["improved"]
+        metrics["label"] = "real_archive_reference_comparison"
+        metrics["reference_name"] = "VIIRS comparison reference (not ground truth)"
+        metrics["evaluation_kind"] = "real_firms_archive"
+        metrics["training_kind"] = "synthetic_benchmark"
+        metrics["n_months"] = int(metrics.get("n", 0))
+        metrics["n_months_locked"] = int(len(months))
+        metrics["n_excluded_no_coverage"] = month_info.get("n_excluded_no_coverage")
+        metrics["n_zero_detection_kept"] = month_info.get("n_zero_detection_kept")
+        metrics["product_kinds_in_sample"] = month_info.get("product_kinds")
+        metrics["month_selection_note"] = month_info.get("note")
+        metrics["confidence_policy_primary"] = PRIMARY_POLICY
+        metrics["confidence_policy_note"] = (
+            "Main metrics use policy A (MODIS ≥30; VIIRS nominal/high). "
+            "confidence_sensitivity compares A/B/C by MODIS→VIIRS closeness; "
+            "the closest policy is diagnostic only and is not auto-selected."
+        )
+        if df is not None and not getattr(df, "empty", True):
+            metrics["confidence_sensitivity"] = confidence_filter_sensitivity(df)
+        if meta:
+            metrics["roi_area_km2"] = meta.get("area_km2")
+            metrics["date_range"] = meta.get("date_range")
+            metrics["product_composition"] = meta.get("product_composition")
+            metrics["product_kind_counts"] = meta.get("product_kind_counts")
+            metrics["satellites"] = meta.get("satellites")
+            metrics["counts"] = meta.get("counts")
+        if metrics.get("n", 0) < 6:
+            metrics["ci_note"] = "unstable — few months; confidence interval not reliable"
+        return metrics
 
     def area_calendar(
         self,
@@ -882,11 +1131,18 @@ class AetherState:
         force: bool = False,
     ) -> dict:
         """Seçilen alan için gerçek FIRMS ham + harmonize yanma takvimi."""
-        df, daily, meta = self._load_area(polygon=polygon, bbox=bbox, force=force)
+        df, daily, meta = self._load_area(
+            polygon=polygon, bbox=bbox, force=force, history_years=REMOTE_DEFAULT_YEARS,
+        )
         if df.empty:
             return clean({
                 "empty": True, "meta": meta, "series": series,
-                "message": "Seçilen alanda arşivde tespit yok (indirme süüyor veya alan boş).",
+                "message": {
+                    "archive_not_ready": "Arşiv henüz hazır değil / indirilmedi.",
+                    "archive_partial_no_rows": "Arşiv kısmi; bu ROI’de henüz satır yok.",
+                    "no_detections": "Veri kapsamı içinde tespit bulunamadı (sıfır aktivite değil — tespit yok).",
+                }.get(meta.get("empty_reason") or "", "Seçilen alanda arşivde tespit yok."),
+                "empty_reason": meta.get("empty_reason"),
             })
         start, end = meta["date_range"]
         data_sy = int(pd.Timestamp(start).year)
@@ -918,7 +1174,7 @@ class AetherState:
             "current_month_vs_median": current_month_vs_median(
                 daily[col].astype(float), year=ty, month=month,
             ),
-            "local_validation": self._area_local_validation(daily),
+            "local_validation": self._area_local_validation(daily, meta, df=df),
             "series": series,
         })
 
@@ -931,7 +1187,9 @@ class AetherState:
         force: bool = False,
     ) -> dict:
         """Seçilen alan için ham / harmonize zaman serisi (yapısal kırılma grafiği)."""
-        df, daily, meta = self._load_area(polygon=polygon, bbox=bbox, force=force)
+        df, daily, meta = self._load_area(
+            polygon=polygon, bbox=bbox, force=force, history_years=REMOTE_DEFAULT_YEARS,
+        )
         if df.empty:
             return clean({"empty": True, "meta": meta, "message": "Seçilen alanda tespit yok."})
         step = "MS" if freq == "monthly" else "YS"
@@ -943,9 +1201,13 @@ class AetherState:
             m = m.loc[:last_complete]
         est = m["harmonized"]
         sdv = np.sqrt(m["harmonized_var"]) * self.kappa
-        # Gerçek arşivde karşı-olgusal yok: 2012 sonrası VIIRS native referans
+        # Gerçek arşivde karşı-olgusal yok: 2012 sonrası VIIRS native referans.
+        # Pre-VIIRS: NaN (not 0) — zero would falsely imply "no fire activity".
         truth = m["viirs_native"].where(m.index >= VSTART)
         fmt = "%Y-%m" if freq == "monthly" else "%Y"
+        last_partial = False
+        if freq == "annual" and len(m):
+            last_partial = True
         return clean({
             "empty": False,
             "region": "archive:tr",
@@ -959,12 +1221,294 @@ class AetherState:
             "harmonized_lo": (est - Z90 * sdv).clip(lower=0),
             "harmonized_hi": est + Z90 * sdv,
             "truth_snpp_everywhere": truth,
+            "viirs_reference_available": [bool(t >= VSTART) for t in m.index],
+            "viirs_reference_label": "VIIRS comparison reference (absent before 2012-01-20)",
             "static_removed": m["static_removed"],
             "transition": "2012-01-20",
-            "partial_last_period": freq == "annual",
+            "timeline_markers": TIMELINE_MARKERS,
+            "partial_last_period": last_partial or freq == "annual",
+            "uncertainty_note": "P10/P50/P90 and 90% band are model prediction intervals, not fire-count confidence.",
             "meta": meta,
-            "local_validation": self._area_local_validation(daily),
+            "local_validation": self._area_local_validation(daily, meta, df=df),
         })
+
+    def area_density(
+        self,
+        *,
+        polygon: list[list[float]] | None = None,
+        bbox: list[float] | None = None,
+        years: int = 5,
+        instrument: str = "all",
+        force: bool = False,
+    ) -> dict:
+        """ROI içinde son ``years`` yılın FIRMS hotspot tespit yoğunluğu (H3-7 hücreleri).
+
+        Renk = hücre başına tespit sayısı (polygon fill). Yangın olayı veya yanmış alan değildir.
+        """
+        requested_years = max(1, min(int(years), 25))
+        inst = (instrument or "all").upper()
+        if inst not in ("ALL", "MODIS", "VIIRS"):
+            raise ValueError("instrument all | MODIS | VIIRS olmalı")
+
+        # Pass the requested years; _load_area / remote clamp to REMOTE_MAX_YEARS when needed.
+        df, _, meta = self._load_area(
+            polygon=polygon, bbox=bbox, force=force,
+            history_years=requested_years,
+        )
+        local = bool(meta.get("local_archive"))
+        if local:
+            effective_years = requested_years
+        else:
+            effective_years = int(meta.get("effective_years") or meta.get("history_years") or min(
+                requested_years, REMOTE_MAX_YEARS,
+            ))
+            effective_years = max(1, min(effective_years, REMOTE_MAX_YEARS))
+
+        year_note = None
+        if not local and requested_years > REMOTE_MAX_YEARS:
+            year_note = (
+                f"Requested {requested_years}y; remote ROI capped at {REMOTE_MAX_YEARS}y "
+                f"(effective {effective_years}y)."
+            )
+
+        def _empty_payload(message: str, win=None) -> dict:
+            start = win[0] if win else None
+            end = win[1] if win else None
+            return clean({
+                "empty": True,
+                "meta": meta,
+                "years": effective_years,
+                "requested_years": requested_years,
+                "effective_years": effective_years,
+                "window_start": start,
+                "window_end": end,
+                "instrument": inst if inst != "ALL" else "all",
+                "message": message,
+                "year_note": year_note,
+                "render": "h3_polygon",
+                "points": [],
+                "legend": self._density_legend(
+                    0, 0, effective_years, start, end,
+                    remote=not local, requested_years=requested_years,
+                ),
+            })
+
+        if df.empty:
+            return _empty_payload({
+                "archive_not_ready": "Yerel arşiv henüz hazır değil.",
+                "no_detections": "Seçilen alanda tespit yok.",
+                "no_product_coverage": "Bu tarih penceresinde FIRMS ürünü yok.",
+            }.get(meta.get("empty_reason") or "", meta.get("note") or "Seçilen alanda veri yok."))
+
+        ts = pd.to_datetime(df["ts"])
+        data_end = ts.max()
+        data_start = ts.min()
+        # Rolling window uses effective (capped) years — not the possibly-over-cap request.
+        win_start = data_end - pd.DateOffset(years=effective_years)
+        mask = ts >= win_start
+        sub = df.loc[mask].copy()
+        if inst in ("MODIS", "VIIRS"):
+            sub = sub.loc[sub["instrument"].astype(str).str.upper() == inst]
+
+        n_raw = int(len(sub))
+        if "conf_ok" in sub.columns and "is_static" in sub.columns:
+            ok = sub["conf_ok"].to_numpy() & ~sub["is_static"].to_numpy()
+            excluded = int((~ok).sum())
+            sub = sub.loc[ok]
+        else:
+            excluded = 0
+
+        win = [str(win_start.date()), str(data_end.date())]
+        if sub.empty:
+            out = _empty_payload(
+                "Pencerede (güven/statik süzgeç sonrası) tespit yok.",
+                win=win,
+            )
+            out["n_raw_in_window"] = n_raw
+            out["excluded_lowconf_or_static"] = excluded
+            out["meta"] = {**meta, "window": win, "times_utc": True}
+            return out
+
+        if "h3_7" not in sub.columns:
+            sub = geo.add_h3_columns(sub)
+
+        g = sub.groupby("h3_7", observed=True)
+        counts = g.size().rename("n")
+        frp = g["frp"].sum().rename("frp_sum") if "frp" in sub.columns else None
+        # Per-cell instrument mix for click popups (not fire-event counts).
+        if "instrument" in sub.columns:
+            inst_tab = (
+                sub.groupby(["h3_7", sub["instrument"].astype(str).str.upper()], observed=True)
+                .size()
+                .unstack(fill_value=0)
+            )
+        else:
+            inst_tab = None
+        if "satellite" in sub.columns:
+            sat_tab = (
+                sub.groupby(["h3_7", sub["satellite"].astype(str)], observed=True)
+                .size()
+                .unstack(fill_value=0)
+            )
+        else:
+            sat_tab = None
+
+        tab = counts.to_frame()
+        if frp is not None:
+            tab["frp_sum"] = frp
+        else:
+            tab["frp_sum"] = 0.0
+        tab = tab.reset_index()
+        n_max = int(tab["n"].max()) if len(tab) else 0
+        n_total = int(tab["n"].sum())
+
+        points = []
+        for row in tab.itertuples(index=False):
+            cell = int(row.h3_7)
+            lat, lon = geo.cell_center(cell)
+            n = int(row.n)
+            # Relative weight for optional kernel fallback; primary render is polygon fill by n.
+            w = float(np.sqrt(n / max(n_max, 1)))
+            platforms = {}
+            if sat_tab is not None and cell in sat_tab.index:
+                platforms = {str(k): int(v) for k, v in sat_tab.loc[cell].items() if int(v) > 0}
+            instruments = {}
+            if inst_tab is not None and cell in inst_tab.index:
+                instruments = {str(k): int(v) for k, v in inst_tab.loc[cell].items() if int(v) > 0}
+            points.append({
+                "lat": round(float(lat), 5),
+                "lon": round(float(lon), 5),
+                "n": n,
+                "frp_sum": round(float(row.frp_sum), 1),
+                "w": round(w, 4),
+                "h3": geo.h3_str(cell),
+                "boundary": _boundary(cell),
+                "platforms": platforms,
+                "instruments": instruments,
+            })
+
+        points.sort(key=lambda p: p["n"], reverse=True)
+
+        legend = self._density_legend(
+            n_max, n_total, effective_years, win[0], win[1],
+            remote=not local, requested_years=requested_years,
+        )
+        return clean({
+            "empty": False,
+            "years": effective_years,
+            "requested_years": requested_years,
+            "effective_years": effective_years,
+            "window_start": win[0],
+            "window_end": win[1],
+            "instrument": inst if inst != "ALL" else "all",
+            "window": win,
+            "archive_span": [str(data_start.date()), str(data_end.date())],
+            "n_detections": n_total,
+            "n_raw_in_window": n_raw,
+            "excluded_lowconf_or_static": excluded,
+            "n_cells": len(points),
+            "n_max_per_cell": n_max,
+            "cell_area_km2_approx": round(geo.cell_area_km2(7), 2),
+            "aggregation": (
+                "H3 res-7 polygons (≈5.2 km²); fill color = detections per cell. "
+                "Empty cells omitted (not shown as zero fires)."
+            ),
+            "render": "h3_polygon",
+            "meaning": (
+                "FIRMS hotspot detection density over the selected window — "
+                "not fire-event count and not burned area."
+            ),
+            "year_note": year_note,
+            "points": points,
+            "legend": legend,
+            "meta": {
+                **meta,
+                "window": win,
+                "window_start": win[0],
+                "window_end": win[1],
+                "requested_years": requested_years,
+                "effective_years": effective_years,
+                "times_utc": True,
+            },
+        })
+
+    @staticmethod
+    def _density_legend(
+        n_max: int,
+        n_total: int,
+        years: int,
+        start: str | None,
+        end: str | None,
+        *,
+        remote: bool = False,
+        requested_years: int | None = None,
+    ) -> dict:
+        """Legend for H3 polygon density (exact per-cell detection counts)."""
+        bins = []
+        if n_max <= 0:
+            bins = [
+                {
+                    "level": "none",
+                    "min_n": 0,
+                    "max_n": 0,
+                    "label_tr": "Veri yok (hücre çizilmez)",
+                    "label_en": "No data (cell not drawn)",
+                    "approx_n_per_cell": 0,
+                },
+            ]
+        else:
+            # Discrete count bins mapped to the UI color ramp stops
+            edges = [1]
+            for frac in (0.12, 0.35, 0.55, 0.78, 1.0):
+                edge = max(1, int(round((frac ** 2) * n_max)))
+                if edge > edges[-1]:
+                    edges.append(edge)
+            if edges[-1] < n_max:
+                edges.append(n_max)
+            labels = [
+                ("çok düşük", "very low"),
+                ("düşük", "low"),
+                ("orta", "medium"),
+                ("yüksek", "high"),
+                ("en yüksek", "highest"),
+            ]
+            for i in range(len(edges) - 1):
+                lo, hi = edges[i], edges[i + 1]
+                tr, en = labels[min(i, len(labels) - 1)]
+                bins.append({
+                    "level": en.replace(" ", "_"),
+                    "min_n": lo,
+                    "max_n": hi,
+                    "weight": round((hi / max(n_max, 1)) ** 0.5, 4),
+                    "approx_n_per_cell": hi,
+                    "label_tr": f"{tr} ({lo}–{hi} tespit / hücre)",
+                    "label_en": f"{en} ({lo}–{hi} detections / cell)",
+                })
+        title_suffix = ""
+        if remote and requested_years and requested_years > years:
+            title_suffix = f" (remote cap; asked {requested_years}y)"
+            title_suffix_tr = f" (uzaktan üst sınır; istenen {requested_years}y)"
+        else:
+            title_suffix_tr = ""
+        return {
+            "title_tr": f"Son {years} yıl — FIRMS sıcak nokta tespit yoğunluğu{title_suffix_tr}",
+            "title_en": f"Last {years} years — FIRMS hotspot detection density{title_suffix}",
+            "unit_tr": "H3 hücre başına tespit sayısı (polygon dolgu; tam sayı)",
+            "unit_en": "Detections per H3 cell (polygon fill; exact counts)",
+            "not_tr": (
+                "Yangın olayı sayısı veya yanmış alan değildir. Aynı olay tekrar sayılabilir. "
+                "Boş hücre = veri yok, sıfır yangın iddiası değil."
+            ),
+            "not_en": (
+                "Not fire-event count or burned area. The same event can be re-counted. "
+                "Missing cells mean no detections drawn — not a claim of zero fires."
+            ),
+            "window": [start, end],
+            "n_max_per_cell": n_max,
+            "n_total": n_total,
+            "render": "h3_polygon",
+            "bins": bins,
+        }
 
     def area_break(
         self,
@@ -974,7 +1518,9 @@ class AetherState:
         force: bool = False,
     ) -> dict:
         """Seçilen alanda 2012 sensör geçişi yapısal kırılma testleri."""
-        df, daily, meta = self._load_area(polygon=polygon, bbox=bbox, force=force)
+        df, daily, meta = self._load_area(
+            polygon=polygon, bbox=bbox, force=force, history_years=REMOTE_DEFAULT_YEARS,
+        )
         if df.empty:
             return clean({"empty": True, "meta": meta, "message": "Seçilen alanda tespit yok."})
         m = daily.resample("MS").sum(min_count=1)
@@ -982,26 +1528,45 @@ class AetherState:
             today = pd.Timestamp.utcnow().tz_localize(None).normalize()
             last_complete = (today.replace(day=1) - pd.Timedelta(days=1)).replace(day=1)
             m = m.loc[:last_complete]
-        truth = m["viirs_native"].where(m.index >= VSTART).fillna(0.0)
+        # Pre-VIIRS reference is unavailable — keep NaN (do not fill 0).
+        truth = m["viirs_native"].where(m.index >= VSTART)
         series = {
             "raw_all": m["raw_all"],
             "raw_filtered": m["raw_filtered"],
             "harmonized": m["harmonized"],
             "truth": truth,
         }
-        reports = {k: sd.structural_break_report(v) for k, v in series.items()}
+        reports = {}
+        for k, v in series.items():
+            # Drop NaN months for tests; flag pre-VIIRS gap on truth series
+            vv = v.dropna() if k == "truth" else v
+            reports[k] = sd.structural_break_report(vv) if len(vv) >= 8 else {
+                "note": "insufficient data", "pettitt_monthly": {"significant": False, "p_value": None},
+            }
+            if k == "truth":
+                reports[k]["pre_viirs_note"] = (
+                    "VIIRS comparison reference absent before 2012-01-20 — "
+                    "zeros are not shown as 'no activity'."
+                )
         verdict = sd.break_verdict(reports)
         verdict["notes"] = list(verdict.get("notes") or []) + [
             "Kapsam: çizilen ROI içindeki gerçek NASA FIRMS arşivi (simüle benchmark değil).",
             f"Ham tespit: {meta.get('raw_count', 0):,} · alan ~{meta.get('area_km2', '?')} km².",
+            "p<0.05 is not a definitive break (autocorrelation can inflate significance).",
+            "VIIRS column = comparison reference, not ground truth.",
         ]
+        verdict["pvalue_caveat"] = (
+            "Pettitt/Chow assume independent samples; monthly fire series are autocorrelated. "
+            "Read p-values with effect size (step %) — not as operational decisions."
+        )
         return clean({
             "empty": False,
             "region": "archive:tr",
             "reports": reports,
             "verdict": verdict,
             "meta": meta,
-            "local_validation": self._area_local_validation(daily),
+            "timeline_markers": TIMELINE_MARKERS,
+            "local_validation": self._area_local_validation(daily, meta, df=df),
         })
 
     # ------------------------------------------------------------------
@@ -1014,11 +1579,13 @@ class AetherState:
         focus: str = "break",
         section: str = "overview",
         question: str | None = None,
+        lang: str = "tr",
     ) -> dict:
-        """ROI için bölüm bazlı dayanak üretir ve DeepSeek ile Türkçe yorum döner."""
+        """ROI için bölüm bazlı dayanak üretir ve DeepSeek ile dil-uyumlu yorum döner."""
         from src.analytics import deepseek_client as ds
 
         sec = (section or "overview").strip()[:64]
+        en = (lang or "tr").strip().lower() == "en"
         if not polygon or len(polygon) < 3:
             return clean({"available": ds.configured(), "empty": True, "message": "Poligon gerekli (≥ 3 köşe)."})
 
@@ -1070,7 +1637,9 @@ class AetherState:
         area_df = None
         if not intensity or sec in ("anomalies", "envelope"):
             try:
-                area_df, _, area_meta = self._load_area(polygon=polygon)
+                area_df, _, area_meta = self._load_area(
+                    polygon=polygon, history_years=REMOTE_DEFAULT_YEARS,
+                )
                 if not intensity:
                     intensity = area_meta.get("intensity") or self._frp_intensity(area_df)
             except Exception:
@@ -1260,16 +1829,22 @@ class AetherState:
                 "available": False,
                 "empty": False,
                 "used_numbers": used,
-                "message": "DeepSeek API anahtarı tanımlı değil (backend/.env → DEEPSEEK_API_KEY).",
+                "lang": "en" if en else "tr",
+                "message": (
+                    "DeepSeek API key not set (backend/.env → DEEPSEEK_API_KEY)."
+                    if en else
+                    "DeepSeek API anahtarı tanımlı değil (backend/.env → DEEPSEEK_API_KEY)."
+                ),
             })
 
         try:
-            out = ds.chat_interpret(used, focus=focus, section=sec, question=question)
+            out = ds.chat_interpret(used, focus=focus, section=sec, question=question, lang=lang)
         except RuntimeError as exc:
             return clean({
                 "available": True,
                 "empty": False,
                 "used_numbers": used,
+                "lang": "en" if en else "tr",
                 "error": str(exc),
             })
 
@@ -1279,14 +1854,16 @@ class AetherState:
             "markdown": out["markdown"],
             "model": out["model"],
             "used_numbers": used,
+            "lang": "en" if en else "tr",
         })
 
     # ------------------------------------------------------------------
     # user-supplied detections
     # ------------------------------------------------------------------
     def harmonize_detections(self, rows: list[dict]) -> dict:
-        satmap = {"terra": "Terra", "aqua": "Aqua", "snpp": "SNPP", "npp": "SNPP", "noaa20": "NOAA20", "n20": "NOAA20",
-                  "t": "Terra", "a": "Aqua", "n": "SNPP"}
+        satmap = {"terra": "Terra", "aqua": "Aqua", "snpp": "SNPP", "npp": "SNPP",
+                  "noaa20": "NOAA20", "n20": "NOAA20", "noaa21": "NOAA21", "n21": "NOAA21",
+                  "t": "Terra", "a": "Aqua", "n": "SNPP", "j1": "NOAA20", "j2": "NOAA21"}
         recs = []
         for r in rows:
             sat = satmap.get(str(r["satellite"]).lower(), "SNPP")

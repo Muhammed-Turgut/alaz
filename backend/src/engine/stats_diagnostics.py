@@ -209,10 +209,19 @@ def break_verdict(reports: dict, break_date: str = "2012-01-20") -> dict:
             if tru and tru["pettitt_monthly"]["significant"] and months_from_break(tru["pettitt_monthly"].get("change_date")) is not None \
                     and abs((pd.Timestamp(tru["pettitt_monthly"]["change_date"]) - pd.Timestamp(pm["change_date"])).days) < 400:
                 out["notes"].append(
-                    f"Aylık Pettitt hâlâ {pm.get('change_date')} işaretliyor (p={pm['p_value']:.1e}); yer-gerçeği serisi "
-                    f"aynı kırılmayı gösteriyor (p={tru['pettitt_monthly']['p_value']:.1e}) — senaryoda gerçek iklim rejimi "
-                    f"değişimi, sensör artefaktı değil.")
+                    f"Aylık Pettitt hâlâ {pm.get('change_date')} işaretliyor (p={pm['p_value']:.1e}); "
+                    f"VIIRS karşılaştırma referansı aynı kırılmayı gösteriyor "
+                    f"(p={tru['pettitt_monthly']['p_value']:.1e}) — senaryoda rejim değişimi olabilir, "
+                    f"sensör artefaktı değil (p kesin karar değildir).")
             else:
                 out["notes"].append(
-                    f"Aylık Pettitt {pm.get('change_date')} işaretliyor (p={pm['p_value']:.1e}); kalan sapmayı incele.")
+                    f"Aylık Pettitt {pm.get('change_date')} işaretliyor (p={pm['p_value']:.1e}); "
+                    f"kalan sapmayı incele — p<0.05 kesin kırılma değildir.")
+    out["notes"].append(
+        "Uyarı: Pettitt/Chow bağımsız örnek varsayar; otokorelasyonlu serilerde p anti-konservatif olabilir. "
+        "Çoklu testlerde yanlış pozitif riski artar. Adım % ve etki büyüklüğüyle birlikte okuyun."
+    )
+    out["pvalue_caveat"] = (
+        "p<0.05 is not a definitive structural break under autocorrelation."
+    )
     return out

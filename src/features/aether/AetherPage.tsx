@@ -10,28 +10,23 @@ import { MapTab, type FitCommand } from "./MapTab";
 import { useLiveFires } from "./live/useLiveFires";
 import type { MapView } from "./mapView";
 import { ModelTab } from "./ModelTab";
+import { DisclaimerBanner } from "./DisclaimerBanner";
+import { DemoGuide } from "./DemoGuide";
 import { Sidebar } from "./Sidebar";
 import { useDataSource } from "./sourceContext";
 import type { ArchiveStatus, BBox, LatLng, Scope, Sensor, Source } from "./types";
 import { cx } from "./ui";
+import { useT } from "@/lib/i18n";
 import styles from "./aether.module.css";
 
-/** Türkiye kapsama kutusu (south, west, north, east) — arşiv area.json ile aynı. */
-const ARCHIVE_TR_BBOX: BBox = [35.8, 25.5, 42.3, 45.0];
-
 type Tab = "map" | "break" | "calendar" | "explain" | "briefing" | "model";
-const TABS: { id: Tab; label: string }[] = [
-  { id: "map", label: "Görev haritası" },
-  { id: "break", label: "Yapısal kırılma" },
-  { id: "calendar", label: "Yanma takvimi" },
-  { id: "explain", label: "Sıcak nokta açıklayıcı" },
-  { id: "briefing", label: "Brifing" },
-  { id: "model", label: "Model ve doğrulama" },
-];
+const TAB_IDS: Tab[] = ["map", "break", "calendar", "explain", "briefing", "model"];
 
 type Target = { kind: "hex"; id: string } | { kind: "roi" } | null;
 
 export function AetherPage() {
+  const t = useT();
+  const en = t.lang === "en";
   const dataSource = useDataSource();
   const source = dataSource?.source ?? "archive";
 
@@ -121,7 +116,8 @@ export function AetherPage() {
     if (fitNext.current) {
       fitNext.current = false;
       fitId.current += 1;
-      setFit({ id: fitId.current, bbox: source === "archive" ? ARCHIVE_TR_BBOX : null });
+      // World view — ROI may be drawn anywhere (local TR disk or remote FIRMS API).
+      setFit({ id: fitId.current, bbox: null });
     }
   }, [ready, source]);
 
@@ -235,38 +231,55 @@ export function AetherPage() {
       if (!live.loading && live.status.message && live.totalCount === 0 && liveMetas.length) return { kind: "info", text: "Seçili sensör için son 24 saatte tespit yok." };
       return null;
     }
-    if (!archive?.available) return { kind: "warn", text: "Türkiye arşivi henüz yok. İndirme: backend içinde python -m src.data.firms_archive ..." };
-    if (archive.partial) return { kind: "info", text: `Gerçek FIRMS arşivi iniyor (${archive.done_chunks}/${archive.total_chunks}). Poligon çizerek kısmi geçmişi analiz edebilirsin.` };
+    if (!archive?.available && !archive?.remote_api_configured) {
+      return { kind: "warn", text: "Yerel Türkiye arşivi yok ve FIRMS_MAP_KEY tanımlı değil — küresel ROI için anahtar gerekir. Yerel: python -m src.data.firms_archive ..." };
+    }
+    if (archive?.partial) return { kind: "info", text: `Yerel TR arşivi iniyor (${archive.done_chunks}/${archive.total_chunks}). Dünya geneli ROI çizilebilir (TR yerel hızlı; dışı uzaktan API).` };
     // Yönlendirme yalnızca harita sekmesinde; diğer sekmelerin kendi boş durumları var.
     if (!roi && tab === "map") {
-      return { kind: "info", text: "Türkiye kutusu içinde poligon çiz (≤ ~120.000 km²) veya enlem/boylam gir; ardından takvim / kırılma / brifing." };
+      return { kind: "info", text: "Dünya geneli poligon çiz (≤ ~120.000 km²) veya enlem/boylam gir. TR yerel disk hızlı; dışı on-demand FIRMS API." };
     }
     if (!basemapOk) return { kind: "info", text: "Harita altlığı döşemelerine ulaşılamıyor (çevrimdışı). Altıgen katmanlar yine de çizilir." };
     return null;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isLive, isArchive, archive, roi, tab, live.status, live.loading, live.totalCount, live.meta, basemapOk]);
 
+  const tierLabel = (t: string) => {
+    if (t === "cache") return en ? "fresh cache" : "taze önbellek";
+    if (t === "stale-cache") return en ? "stale cache" : "eski önbellek";
+    if (t === "open-feed") return en ? "open feed" : "açık besleme";
+    if (t === "api") return "API";
+    if (t === "bundled-sample") return en ? "bundled sample" : "paketli örnek";
+    return t;
+  };
   const dataPill = isArchive
     ? {
-        tone: archive?.available && !archive.partial ? "ok" : "warn",
+        tone: (archive?.available && !archive.partial) || archive?.remote_api_configured ? "ok" : "warn",
         text: archive?.available
-          ? `veri: GERÇEK FIRMS arşiv TR (${archive.done_chunks}/${archive.total_chunks})`
-          : "veri: arşiv yok",
+          ? `veri: FIRMS arşiv (TR yerel + küresel API) (${archive.done_chunks}/${archive.total_chunks})`
+          : archive?.remote_api_configured
+            ? "veri: küresel FIRMS API (yerel TR yok)"
+            : "veri: arşiv/API yok",
       }
     : !liveMetas.length
       ? { tone: "warn", text: live.status.isError ? "veri: ALINAMADI" : "veri: NASA FIRMS çekiliyor..." }
       : liveOk
-        ? { tone: "ok", text: `veri: GERÇEK NASA FIRMS (${liveTiers.map((t) => (t === "cache" ? "önbellek ≤3 sa" : t)).join(", ")})` }
-        : { tone: "warn", text: `veri: CANLI DEĞİL (${liveTiers.join(", ") || "yok"})` };
+        ? { tone: "ok", text: `veri: CANLI NASA FIRMS (${liveTiers.map(tierLabel).join(", ")})` }
+        : {
+            tone: "warn",
+            text: `veri: CANLI DEĞİL (${liveTiers.map(tierLabel).join(", ") || "yok"})`
+              + (liveMetas[0]?.newest ? ` · en yeni gözlem ${liveMetas[0].newest}` : ""),
+          };
 
-  const regionBox: BBox | null = isArchive ? ARCHIVE_TR_BBOX : null;
+  // No dashed TR coverage box — it looked like a hard selection limit.
+  const regionBox: BBox | null = null;
 
   const roiHint = drawing
     ? "Çizim: köşe eklemek için tıkla, çift tıkla veya Bitir'e bas. Esc iptal."
     : roi
       ? `${roi.length} köşeli alan seçili.${isArchive ? " Analiz sekmeleri bu poligonu kullanır." : ""}`
       : isArchive
-        ? "Türkiye kutusu içinde poligon çiz (≤ ~120.000 km²) veya enlem/boylam/yarıçap gir."
+        ? "Dünya geneli poligon çiz (≤ ~120.000 km²) veya enlem/boylam/yarıçap gir. TR yerel disk varsa hızlı; dışı on-demand FIRMS API (MAP_KEY)."
         : "Köşe eklemek için haritaya tıkla, kapatmak için çift tıkla. Enlem/boylam da uygulanır.";
 
   if (!ready) {
@@ -307,25 +320,36 @@ export function AetherPage() {
       <div className={styles.main}>
         <div className={styles.statusRow}>
           <span className={cx(styles.pill, styles.pillOk)}>
-            {isLive ? "Kapsam: canlı global (24 sa)" : "Pilot: Türkiye arşivi"}
+            {isLive ? t.pillLive : t.pillPilot}
           </span>
           <span className={styles.pill}>
             {isLive
               ? `canlı harita · ${live.totalCount.toLocaleString("tr-TR")} FIRMS noktası`
-              : `arşiv TR · ${archive?.done_chunks ?? "?"}/${archive?.total_chunks ?? "?"} dilim`}
+              : `arşiv · TR yerel ${archive?.done_chunks ?? "?"}/${archive?.total_chunks ?? "?"} · küresel ROI açık`}
           </span>
           <span className={cx(styles.pill, dataPill.tone === "ok" ? styles.pillOk : styles.pillWarn)}>{dataPill.text}</span>
         </div>
-        <nav className={styles.tabs} aria-label="AETHER-FIRE bölümleri">
-          {TABS.map((t) => (
-            <button key={t.id} type="button" className={cx(tab === t.id && styles.on)} onClick={() => goTab(t.id)}>{t.label}</button>
+        <DisclaimerBanner />
+        <DemoGuide
+          sourceIsArchive={isArchive}
+          onLoadDemoRoi={(pts) => {
+            goTab("map");
+            setRoi(pts);
+            setDrawing(false);
+            setTarget({ kind: "roi" });
+            queueMicrotask(() => mapRef.current?.setRoiPolygon(pts, { fit: true }));
+          }}
+        />
+        <nav className={styles.tabs} aria-label="AETHER-FIRE sections">
+          {TAB_IDS.map((id) => (
+            <button key={id} type="button" className={cx(tab === id && styles.on)} onClick={() => goTab(id)}>{t.tabs[id]}</button>
           ))}
         </nav>
         {banner && <div className={cx(styles.banner, banner.kind === "info" && styles.bannerInfo)}>{banner.text}</div>}
 
         <div hidden={tab !== "map"}>
           <MapTab
-            mapRef={mapRef} live={isLive} archiveMode={isArchive}
+            mapRef={mapRef} live={isLive} archiveMode={isArchive} roi={roi}
             points={live.points} liveTotal={live.totalCount}
             livePerInstrument={live.perInstrument} sensor={sensor} onSensor={setSensor}
             payload={null} regionBox={regionBox} fit={fit}
@@ -338,6 +362,7 @@ export function AetherPage() {
             onDrawing={setDrawing}
             onBasemap={setBasemapOk}
             onDrawRoi={startDraw}
+            remoteMaxYears={archive?.remote_max_years ?? 10}
           />
         </div>
         {visited.has("break") && (
